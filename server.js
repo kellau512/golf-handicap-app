@@ -237,10 +237,14 @@ async function refreshCourseSnapshot(state) {
   if (snapshotRefreshes.has(state)) return snapshotRefreshes.get(state);
 
   const refresh = (async () => {
+    const previousSnapshot = await readCourseSnapshot(state);
     const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(state)}`);
     const list = Array.isArray(data) ? data : data.courses || data.results || [];
     const candidates = list.map(normalizeCourseSummary);
     const courses = await hydrateCourseSummaries(candidates);
+    if (previousSnapshot?.courses?.length && courses.length < previousSnapshot.courses.length) {
+      return previousSnapshot;
+    }
     const snapshot = {
       state,
       refreshedAt: new Date().toISOString(),
@@ -315,10 +319,10 @@ async function searchCourses(query, stateFilter = "") {
       };
     } catch (error) {
       payload = {
-        courses: sortCoursesByName(sampleCourses.filter(course => course.state === browseState)),
+        courses: [],
         meta: {
-          source: "sample",
-          message: `OpenGolfAPI is unavailable right now, so matching ${browseState} sample courses are shown.`,
+          source: "error",
+          message: `Course snapshot is unavailable and OpenGolfAPI could not refresh ${browseState} course data right now.`,
           error: error.message
         }
       };
