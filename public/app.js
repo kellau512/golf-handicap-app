@@ -1,6 +1,8 @@
 const state = {
   token: localStorage.getItem("golfToken") || "",
   user: null,
+  pendingPreferredCourseId: "",
+  pendingPreferredTeeId: "",
   courses: [],
   selectedCourse: null,
   selectedTee: null
@@ -88,6 +90,7 @@ async function register() {
     state.token = payload.token;
     state.user = payload.user;
     localStorage.setItem("golfToken", state.token);
+    primePreferredSetup();
     setMessage("Account created.");
     renderAuth();
     calculate();
@@ -108,9 +111,10 @@ async function login() {
     state.token = payload.token;
     state.user = payload.user;
     localStorage.setItem("golfToken", state.token);
+    primePreferredSetup();
     setMessage("Signed in.");
     renderAuth();
-    calculate();
+    await searchCourses();
   } catch (error) {
     setMessage(error.message);
   }
@@ -134,6 +138,7 @@ async function loadMe() {
   try {
     const payload = await api("/api/me");
     state.user = payload.user;
+    primePreferredSetup();
     renderAuth();
   } catch {
     state.token = "";
@@ -143,19 +148,50 @@ async function loadMe() {
 
 async function saveProfile() {
   if (!state.user) {
-    setMessage("Create an account or log in to save your handicap.");
+    setMessage("Create an account or log in to save your setup.");
     return;
   }
   try {
+    const course = state.selectedCourse;
+    const tee = state.selectedTee;
     const payload = await api("/api/me", {
       method: "PATCH",
-      body: JSON.stringify({ handicapIndex: els.handicapInput.value })
+      body: JSON.stringify({
+        handicapIndex: els.handicapInput.value,
+        preferredCourseId: course?.id || "",
+        preferredCourseName: course?.name || "",
+        preferredCourseState: course?.state || "",
+        preferredTeeId: tee?.id || "",
+        preferredTeeName: tee?.name || ""
+      })
     });
     state.user = payload.user;
-    setMessage("Handicap saved.");
+    setMessage("Setup saved.");
     renderAuth();
   } catch (error) {
     setMessage(error.message);
+  }
+}
+
+function primePreferredSetup() {
+  if (!state.user) return;
+  state.pendingPreferredCourseId = state.user.preferredCourseId || "";
+  state.pendingPreferredTeeId = state.user.preferredTeeId || "";
+  if (state.user.preferredCourseName) {
+    els.courseSearch.value = state.user.preferredCourseName;
+  }
+  if (state.user.preferredCourseState) {
+    els.stateSelect.value = state.user.preferredCourseState;
+  }
+}
+
+function applyPreferredSetup() {
+  if (state.pendingPreferredCourseId) {
+    const course = state.courses.find(item => item.id === state.pendingPreferredCourseId);
+    if (course) {
+      els.courseSelect.value = course.id;
+      state.pendingPreferredCourseId = "";
+    }
   }
 }
 
@@ -198,6 +234,7 @@ function renderCourses() {
     option.textContent = `${[course.name, course.city, course.state].filter(Boolean).join(" • ")} (${source})`;
     els.courseSelect.append(option);
   }
+  applyPreferredSetup();
   selectCourse();
 }
 
@@ -219,6 +256,13 @@ function renderTees() {
     const yardage = tee.yardage ? ` • ${tee.yardage} yds` : "";
     option.textContent = `${tee.name} ${tee.gender ? `(${tee.gender})` : ""} • ${tee.rating}/${tee.slope}${yardage}`;
     els.teeSelect.append(option);
+  }
+  if (state.pendingPreferredTeeId) {
+    const tee = state.selectedCourse.tees.find(item => item.id === state.pendingPreferredTeeId);
+    if (tee) {
+      els.teeSelect.value = tee.id;
+      state.pendingPreferredTeeId = "";
+    }
   }
   selectTee();
   renderTeeComparison();

@@ -151,7 +151,12 @@ function publicUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
-    handicapIndex: user.handicapIndex ?? ""
+    handicapIndex: user.handicapIndex ?? "",
+    preferredCourseId: user.preferredCourseId || "",
+    preferredCourseName: user.preferredCourseName || "",
+    preferredCourseState: user.preferredCourseState || "",
+    preferredTeeId: user.preferredTeeId || "",
+    preferredTeeName: user.preferredTeeName || ""
   };
 }
 
@@ -396,6 +401,11 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     if (body.name !== undefined) session.user.name = String(body.name).trim();
     if (body.handicapIndex !== undefined) session.user.handicapIndex = body.handicapIndex === "" ? "" : Number(body.handicapIndex);
+    if (body.preferredCourseId !== undefined) session.user.preferredCourseId = String(body.preferredCourseId || "");
+    if (body.preferredCourseName !== undefined) session.user.preferredCourseName = String(body.preferredCourseName || "");
+    if (body.preferredCourseState !== undefined) session.user.preferredCourseState = String(body.preferredCourseState || "");
+    if (body.preferredTeeId !== undefined) session.user.preferredTeeId = String(body.preferredTeeId || "");
+    if (body.preferredTeeName !== undefined) session.user.preferredTeeName = String(body.preferredTeeName || "");
     await writeUsers(session.data);
     json(res, 200, { user: publicUser(session.user) });
     return;
