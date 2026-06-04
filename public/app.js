@@ -216,6 +216,12 @@ async function searchCourses() {
   }
 }
 
+function primeLiveStarterSearch() {
+  if (els.courseSearch.value.trim()) return;
+  els.courseSearch.value = "Pebble Brook";
+  els.stateSelect.value = "IN";
+}
+
 function renderCourses() {
   els.courseSelect.innerHTML = "";
   els.courseSelect.disabled = state.courses.length === 0;
@@ -454,4 +460,9 @@ els.courseSearch.addEventListener("keydown", event => {
   if (event.key === "Enter") searchCourses();
 });
 
-Promise.all([loadMe(), searchCourses(), loadGhinStatus()]).then(() => renderAuth());
+Promise.all([loadMe(), loadGhinStatus()])
+  .then(() => {
+    primeLiveStarterSearch();
+    return searchCourses();
+  })
+  .then(() => renderAuth());

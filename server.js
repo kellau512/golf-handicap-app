@@ -266,10 +266,10 @@ async function hydrateOpenGolfCourse(summary) {
 async function searchCourses(query, stateFilter = "") {
   if (!query || query.length < 2) {
     return {
-      courses: stateFilter ? sampleCourses.filter(course => course.state === stateFilter) : sampleCourses,
+      courses: [],
       meta: {
-        source: "sample",
-        message: "Showing sample courses. Enter at least 2 characters to search live U.S. course data."
+        source: "empty",
+        message: "Enter at least 2 characters to search live U.S. course data."
       }
     };
   }
@@ -296,9 +296,9 @@ async function searchCourses(query, stateFilter = "") {
     }
 
     return {
-      courses: samples,
+      courses: [],
       meta: {
-        source: samples.length ? "sample" : "empty",
+        source: "empty",
         searchedCount: filteredList.length,
         skippedCount: filteredList.length,
         message: filteredList.length
