@@ -5,7 +5,8 @@ const state = {
   pendingPreferredTeeId: "",
   courses: [],
   selectedCourse: null,
-  selectedTee: null
+  selectedTee: null,
+  courseBrowseMode: false
 };
 
 const els = {
@@ -191,8 +192,10 @@ function applyPreferredSetup() {
     if (course) {
       els.courseSelect.value = course.id;
       state.pendingPreferredCourseId = "";
+      return true;
     }
   }
+  return false;
 }
 
 async function searchCourses() {
@@ -207,25 +210,27 @@ async function searchCourses() {
     });
     const payload = await api(`/api/courses?${params.toString()}`);
     state.courses = payload.courses || [];
+    state.courseBrowseMode = payload.meta?.source === "browse";
     els.courseDataMessage.textContent = payload.meta?.message || "";
     renderCourses();
   } catch (error) {
     state.courses = [];
+    state.courseBrowseMode = false;
     els.courseDataMessage.textContent = error.message;
     renderCourses();
   }
-}
-
-function primeLiveStarterSearch() {
-  if (els.courseSearch.value.trim()) return;
-  els.courseSearch.value = "Pebble Brook";
-  els.stateSelect.value = "IN";
 }
 
 function renderCourses() {
   els.courseSelect.innerHTML = "";
   els.courseSelect.disabled = state.courses.length === 0;
   els.teeSelect.disabled = state.courses.length === 0;
+  els.courseSelect.classList.toggle("course-browser", state.courseBrowseMode && state.courses.length > 1);
+  if (state.courseBrowseMode && state.courses.length > 1) {
+    els.courseSelect.size = Math.min(8, state.courses.length);
+  } else {
+    els.courseSelect.removeAttribute("size");
+  }
   if (!state.courses.length) {
     const option = document.createElement("option");
     option.textContent = "No playable courses found";
@@ -240,12 +245,34 @@ function renderCourses() {
     option.textContent = `${[course.name, course.city, course.state].filter(Boolean).join(" • ")} (${source})`;
     els.courseSelect.append(option);
   }
-  applyPreferredSetup();
+  const appliedPreference = applyPreferredSetup();
+  if (state.courseBrowseMode && !appliedPreference) {
+    els.courseSelect.selectedIndex = -1;
+    state.selectedCourse = null;
+    clearPlayableDataOnly();
+    return;
+  }
   selectCourse();
 }
 
-function selectCourse() {
+async function selectCourse() {
   state.selectedCourse = state.courses.find(course => course.id === els.courseSelect.value) || state.courses[0] || null;
+  if (state.selectedCourse && !state.selectedCourse.tees.length) {
+    els.teeSelect.innerHTML = "<option>Loading tees...</option>";
+    els.teeSelect.disabled = true;
+    clearPlayableDataOnly();
+    try {
+      const payload = await api(`/api/courses/${encodeURIComponent(state.selectedCourse.id)}`);
+      const hydratedCourse = payload.course;
+      state.courses = state.courses.map(course => course.id === hydratedCourse.id ? hydratedCourse : course);
+      state.selectedCourse = hydratedCourse;
+      els.teeSelect.disabled = false;
+    } catch (error) {
+      els.courseDataMessage.textContent = `Course selected, but tee data could not be loaded: ${error.message}`;
+      renderCourseDetails();
+      return;
+    }
+  }
   renderTees();
   renderCourseDetails();
 }
@@ -416,6 +443,19 @@ function calculate() {
 function clearScorecard() {
   state.selectedCourse = null;
   state.selectedTee = null;
+  state.courseBrowseMode = false;
+  els.courseSelect.removeAttribute("size");
+  els.courseSelect.classList.remove("course-browser");
+  clearPlayableDataOnly();
+  els.scorecardBody.innerHTML = `
+    <tr>
+      <td colspan="5">Search for a course with complete tee ratings and an 18-hole scorecard.</td>
+    </tr>
+  `;
+}
+
+function clearPlayableDataOnly() {
+  state.selectedTee = null;
   els.teeSelect.innerHTML = "<option>No tees available</option>";
   els.courseHandicap.textContent = "--";
   els.targetScore.textContent = "--";
@@ -428,7 +468,7 @@ function clearScorecard() {
   els.courseDetails.innerHTML = "";
   els.scorecardBody.innerHTML = `
     <tr>
-      <td colspan="5">Search for a course with complete tee ratings and an 18-hole scorecard.</td>
+      <td colspan="5">Select a course with tee ratings to load the scorecard.</td>
     </tr>
   `;
 }
@@ -461,8 +501,5 @@ els.courseSearch.addEventListener("keydown", event => {
 });
 
 Promise.all([loadMe(), loadGhinStatus()])
-  .then(() => {
-    primeLiveStarterSearch();
-    return searchCourses();
-  })
+  .then(() => searchCourses())
   .then(() => renderAuth());

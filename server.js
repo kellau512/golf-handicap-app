@@ -228,6 +228,23 @@ function normalizeHoles(holes) {
   })).filter(hole => hole.number && hole.par && hole.handicap);
 }
 
+function normalizeCourseSummary(raw) {
+  const course = raw.course || raw;
+  const id = String(course.id || course.course_id || course.slug || course.name || crypto.randomUUID());
+  return {
+    id,
+    name: course.name || course.course_name || course.club_name || "Unnamed Course",
+    city: course.city || course.location?.city || "",
+    state: course.state || course.location?.state || course.region || "",
+    address: course.address || course.location?.address || "",
+    courseType: course.course_type || course.type || "",
+    holesCount: Number(course.holes_count || course.holesCount || 0),
+    parTotal: Number(course.par_total || course.parTotal || 0),
+    source: id.startsWith("sample-") ? "sample" : "live",
+    tees: []
+  };
+}
+
 async function fetchOpenGolf(pathname, timeoutMs = 8000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -265,13 +282,31 @@ async function hydrateOpenGolfCourse(summary) {
 
 async function searchCourses(query, stateFilter = "") {
   if (!query || query.length < 2) {
-    return {
-      courses: [],
-      meta: {
-        source: "empty",
-        message: "Enter at least 2 characters to search live U.S. course data."
-      }
-    };
+    try {
+      const data = await fetchOpenGolf("/courses/search?q=");
+      const list = Array.isArray(data) ? data : data.courses || data.results || [];
+      const filteredList = stateFilter ? list.filter(course => course.state === stateFilter) : list;
+      const courses = filteredList.map(normalizeCourseSummary);
+      return {
+        courses,
+        meta: {
+          source: "browse",
+          searchedCount: filteredList.length,
+          message: courses.length
+            ? `Browsing ${courses.length} live course${courses.length === 1 ? "" : "s"}${stateFilter ? ` in ${stateFilter}` : ""}. Select one to load tees.`
+            : `No live U.S. courses were found${stateFilter ? ` in ${stateFilter}` : ""}.`
+        }
+      };
+    } catch (error) {
+      return {
+        courses: stateFilter ? sampleCourses.filter(course => course.state === stateFilter) : sampleCourses,
+        meta: {
+          source: "sample",
+          message: "OpenGolfAPI is unavailable right now, so sample courses are shown.",
+          error: error.message
+        }
+      };
+    }
   }
 
   const samples = sampleCourseMatches(query, stateFilter);
