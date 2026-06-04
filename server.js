@@ -182,6 +182,8 @@ function normalizeCourse(raw, teePayload = null) {
   const name = course.name || course.course_name || course.club_name || "Unnamed Course";
   const city = course.city || course.location?.city || "";
   const state = course.state || course.location?.state || course.region || "";
+  const address = course.address || course.location?.address || "";
+  const courseType = course.course_type || course.type || "";
   const teeSets = teePayload?.tees || course.tees || course.tee_sets || course.teeBoxes || course.tee_boxes || [];
   const holesByTee = course.holes || course.scorecard || [];
 
@@ -203,6 +205,8 @@ function normalizeCourse(raw, teePayload = null) {
     name,
     city,
     state,
+    address,
+    courseType,
     holesCount: Number(course.holes_count || course.holesCount || tees[0]?.holes.length || 0),
     parTotal: Number(course.par_total || course.parTotal || 0),
     source: id.startsWith("sample-") ? "sample" : "live",
@@ -231,10 +235,12 @@ async function fetchOpenGolf(pathname, timeoutMs = 8000) {
   }
 }
 
-function sampleCourseMatches(query) {
+function sampleCourseMatches(query, stateFilter = "") {
   const normalized = query.toLowerCase();
   return sampleCourses.filter(course => {
-    return [course.name, course.city, course.state].some(value => String(value || "").toLowerCase().includes(normalized));
+    const matchesState = !stateFilter || course.state === stateFilter;
+    const matchesText = [course.name, course.city, course.state].some(value => String(value || "").toLowerCase().includes(normalized));
+    return matchesState && matchesText;
   });
 }
 
@@ -252,10 +258,10 @@ async function hydrateOpenGolfCourse(summary) {
   }
 }
 
-async function searchCourses(query) {
+async function searchCourses(query, stateFilter = "") {
   if (!query || query.length < 2) {
     return {
-      courses: sampleCourses,
+      courses: stateFilter ? sampleCourses.filter(course => course.state === stateFilter) : sampleCourses,
       meta: {
         source: "sample",
         message: "Showing sample courses. Enter at least 2 characters to search live U.S. course data."
@@ -263,11 +269,12 @@ async function searchCourses(query) {
     };
   }
 
-  const samples = sampleCourseMatches(query);
+  const samples = sampleCourseMatches(query, stateFilter);
   try {
     const data = await fetchOpenGolf(`/courses/search?q=${encodeURIComponent(query)}`);
     const list = Array.isArray(data) ? data : data.courses || data.results || [];
-    const candidates = list.slice(0, OPEN_GOLF_SEARCH_LIMIT);
+    const filteredList = stateFilter ? list.filter(course => course.state === stateFilter) : list;
+    const candidates = filteredList.slice(0, OPEN_GOLF_SEARCH_LIMIT);
     const hydrated = (await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean);
 
     if (hydrated.length) {
@@ -276,9 +283,9 @@ async function searchCourses(query) {
         meta: {
           source: "live",
           liveCount: hydrated.length,
-          searchedCount: list.length,
-          skippedCount: Math.max(list.length - hydrated.length, 0),
-          message: `Showing ${hydrated.length} live course${hydrated.length === 1 ? "" : "s"} with complete tee and scorecard data.`
+          searchedCount: filteredList.length,
+          skippedCount: Math.max(filteredList.length - hydrated.length, 0),
+          message: `Showing ${hydrated.length} live course${hydrated.length === 1 ? "" : "s"} with complete tee and scorecard data${stateFilter ? ` in ${stateFilter}` : ""}.`
         }
       };
     }
@@ -287,11 +294,11 @@ async function searchCourses(query) {
       courses: samples,
       meta: {
         source: samples.length ? "sample" : "empty",
-        searchedCount: list.length,
-        skippedCount: list.length,
-        message: list.length
+        searchedCount: filteredList.length,
+        skippedCount: filteredList.length,
+        message: filteredList.length
           ? "Live matches were found, but none had both tee ratings and an 18-hole scorecard yet."
-          : "No live U.S. course matches were found."
+          : `No live U.S. course matches were found${stateFilter ? ` in ${stateFilter}` : ""}.`
       }
     };
   } catch (error) {
@@ -404,7 +411,8 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/courses" && req.method === "GET") {
     const query = url.searchParams.get("q") || "";
-    json(res, 200, await searchCourses(query));
+    const stateFilter = (url.searchParams.get("state") || "").trim().toUpperCase();
+    json(res, 200, await searchCourses(query, stateFilter));
     return;
   }
 

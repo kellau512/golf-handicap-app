@@ -19,10 +19,12 @@ const els = {
   logoutBtn: document.querySelector("#logoutBtn"),
   handicapInput: document.querySelector("#handicapInput"),
   courseSearch: document.querySelector("#courseSearch"),
+  stateSelect: document.querySelector("#stateSelect"),
   searchBtn: document.querySelector("#searchBtn"),
   courseSelect: document.querySelector("#courseSelect"),
   courseDataMessage: document.querySelector("#courseDataMessage"),
   teeSelect: document.querySelector("#teeSelect"),
+  courseDetails: document.querySelector("#courseDetails"),
   saveProfileBtn: document.querySelector("#saveProfileBtn"),
   ghinStatus: document.querySelector("#ghinStatus"),
   courseHandicap: document.querySelector("#courseHandicap"),
@@ -162,7 +164,11 @@ async function searchCourses() {
   els.teeSelect.disabled = true;
   els.courseDataMessage.textContent = "Searching live U.S. course data...";
   try {
-    const payload = await api(`/api/courses?q=${encodeURIComponent(els.courseSearch.value.trim())}`);
+    const params = new URLSearchParams({
+      q: els.courseSearch.value.trim(),
+      state: els.stateSelect.value
+    });
+    const payload = await api(`/api/courses?${params.toString()}`);
     state.courses = payload.courses || [];
     els.courseDataMessage.textContent = payload.meta?.message || "";
     renderCourses();
@@ -197,6 +203,7 @@ function renderCourses() {
 function selectCourse() {
   state.selectedCourse = state.courses.find(course => course.id === els.courseSelect.value) || state.courses[0] || null;
   renderTees();
+  renderCourseDetails();
 }
 
 function renderTees() {
@@ -213,6 +220,27 @@ function renderTees() {
     els.teeSelect.append(option);
   }
   selectTee();
+}
+
+function renderCourseDetails() {
+  const course = state.selectedCourse;
+  if (!course) {
+    els.courseDetails.innerHTML = "";
+    return;
+  }
+  const details = [
+    [course.courseType, "Type"],
+    [course.address, "Address"],
+    [course.holesCount ? `${course.holesCount} holes` : "", "Holes"],
+    [course.source === "live" ? "Live data" : "Sample data", "Source"]
+  ].filter(([value]) => value);
+
+  els.courseDetails.innerHTML = details.map(([value, label]) => `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `).join("");
 }
 
 function selectTee() {
@@ -247,6 +275,16 @@ function summarizeStrokes(courseHandicap) {
   const baseText = `${direction} ${base} stroke${base === 1 ? "" : "s"} on every hole`;
   const extraText = extra ? `, plus 1 more on holes ranked 1-${extra}` : "";
   return `${baseText}${extraText}.`;
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
 }
 
 function calculate() {
@@ -297,6 +335,7 @@ function clearScorecard() {
   els.courseFormula.textContent = "--";
   els.targetFormula.textContent = "--";
   els.strokeSummary.textContent = "--";
+  els.courseDetails.innerHTML = "";
   els.scorecardBody.innerHTML = `
     <tr>
       <td colspan="5">Search for a course with complete tee ratings and an 18-hole scorecard.</td>
@@ -314,6 +353,7 @@ els.loginBtn.addEventListener("click", login);
 els.logoutBtn.addEventListener("click", logout);
 els.saveProfileBtn.addEventListener("click", saveProfile);
 els.searchBtn.addEventListener("click", searchCourses);
+els.stateSelect.addEventListener("change", searchCourses);
 els.courseSelect.addEventListener("change", selectCourse);
 els.teeSelect.addEventListener("change", selectTee);
 els.handicapInput.addEventListener("input", calculate);
