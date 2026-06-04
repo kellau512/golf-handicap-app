@@ -10,7 +10,7 @@ const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const OPEN_GOLF_BASE_URL = "https://api.opengolfapi.org/v1";
 const OPEN_GOLF_SEARCH_LIMIT = 10;
-const OPEN_GOLF_BROWSE_LIMIT = 50;
+const DEFAULT_BROWSE_STATE = "CA";
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const courseCache = new Map();
@@ -202,7 +202,8 @@ async function hydrateOpenGolfCourse(summary) {
 }
 
 async function searchCourses(query, stateFilter = "") {
-  const cacheKey = `${query.toLowerCase()}|${stateFilter}`;
+  const browseState = stateFilter || DEFAULT_BROWSE_STATE;
+  const cacheKey = `${query.toLowerCase()}|${browseState}`;
   const cachedSearch = searchCache.get(cacheKey);
   if (cachedSearch && Date.now() - cachedSearch.cachedAt < SEARCH_CACHE_TTL_MS) {
     return cachedSearch.payload;
@@ -211,27 +212,26 @@ async function searchCourses(query, stateFilter = "") {
   let payload;
   if (!query || query.length < 2) {
     try {
-      const data = await fetchOpenGolf("/courses/search?q=");
+      const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(browseState)}`);
       const list = Array.isArray(data) ? data : data.courses || data.results || [];
-      const filteredList = stateFilter ? list.filter(course => course.state === stateFilter) : list;
-      const candidates = filteredList.slice(0, OPEN_GOLF_BROWSE_LIMIT).map(normalizeCourseSummary);
+      const candidates = list.map(normalizeCourseSummary);
       const courses = (await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean);
       payload = {
         courses,
         meta: {
           source: "browse",
-          searchedCount: filteredList.length,
+          searchedCount: data.count || list.length,
           message: courses.length
-            ? `Browsing ${courses.length} course${courses.length === 1 ? "" : "s"} with tee and scorecard data${stateFilter ? ` in ${stateFilter}` : ""}.`
-            : `No U.S. courses with tee and scorecard data were found${stateFilter ? ` in ${stateFilter}` : ""}.`
+            ? `Browsing ${courses.length} course${courses.length === 1 ? "" : "s"} with tee and scorecard data in ${browseState}.`
+            : `No courses with tee and scorecard data were found in ${browseState}.`
         }
       };
     } catch (error) {
       payload = {
-        courses: stateFilter ? sampleCourses.filter(course => course.state === stateFilter) : sampleCourses,
+        courses: sampleCourses.filter(course => course.state === browseState),
         meta: {
           source: "sample",
-          message: "OpenGolfAPI is unavailable right now, so sample courses are shown.",
+          message: `OpenGolfAPI is unavailable right now, so matching ${browseState} sample courses are shown.`,
           error: error.message
         }
       };
