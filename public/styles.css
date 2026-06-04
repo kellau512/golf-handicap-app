@@ -371,6 +371,17 @@ select {
   font-weight: 900;
 }
 
+.summary-row td {
+  color: var(--navy);
+  background: #e8f4ef;
+  font-weight: 900;
+}
+
+.summary-row:last-child td {
+  color: var(--white);
+  background: var(--blue);
+}
+
 .stroke-pill {
   display: inline-grid;
   place-items: center;

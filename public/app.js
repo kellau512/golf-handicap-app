@@ -408,6 +408,22 @@ function renderTeeComparison() {
   }).join("");
 }
 
+function appendScorecardSummary(label, holes, courseHandicap) {
+  const parTotal = holes.reduce((sum, hole) => sum + hole.par, 0);
+  const strokeTotal = holes.reduce((sum, hole) => sum + strokesForHole(courseHandicap, hole.handicap), 0);
+  const targetTotal = parTotal + strokeTotal;
+  const row = document.createElement("tr");
+  row.className = "summary-row";
+  row.innerHTML = `
+    <td>${label}</td>
+    <td>${parTotal}</td>
+    <td>--</td>
+    <td>${strokeTotal > 0 ? `+${strokeTotal}` : strokeTotal}</td>
+    <td>${targetTotal}</td>
+  `;
+  els.scorecardBody.append(row);
+}
+
 function calculate() {
   const tee = state.selectedTee;
   const handicapIndex = Number(els.handicapInput.value);
@@ -437,6 +453,13 @@ function calculate() {
       <td>${target}</td>
     `;
     els.scorecardBody.append(row);
+    if (hole.number === 9) {
+      appendScorecardSummary("Out", tee.holes.slice(0, 9), result.courseHandicap);
+    }
+    if (hole.number === 18) {
+      appendScorecardSummary("In", tee.holes.slice(9, 18), result.courseHandicap);
+      appendScorecardSummary("Total", tee.holes, result.courseHandicap);
+    }
   }
 }
 
