@@ -1,8 +1,4 @@
 const state = {
-  token: localStorage.getItem("golfToken") || "",
-  user: null,
-  pendingPreferredCourseId: "",
-  pendingPreferredTeeId: "",
   courses: [],
   selectedCourse: null,
   selectedTee: null,
@@ -10,16 +6,6 @@ const state = {
 };
 
 const els = {
-  signedOut: document.querySelector("#signedOut"),
-  signedIn: document.querySelector("#signedIn"),
-  profileName: document.querySelector("#profileName"),
-  authMessage: document.querySelector("#authMessage"),
-  nameInput: document.querySelector("#nameInput"),
-  emailInput: document.querySelector("#emailInput"),
-  passwordInput: document.querySelector("#passwordInput"),
-  registerBtn: document.querySelector("#registerBtn"),
-  loginBtn: document.querySelector("#loginBtn"),
-  logoutBtn: document.querySelector("#logoutBtn"),
   handicapInput: document.querySelector("#handicapInput"),
   courseSearch: document.querySelector("#courseSearch"),
   stateSelect: document.querySelector("#stateSelect"),
@@ -28,7 +14,6 @@ const els = {
   courseDataMessage: document.querySelector("#courseDataMessage"),
   teeSelect: document.querySelector("#teeSelect"),
   courseDetails: document.querySelector("#courseDetails"),
-  saveProfileBtn: document.querySelector("#saveProfileBtn"),
   ghinStatus: document.querySelector("#ghinStatus"),
   courseHandicap: document.querySelector("#courseHandicap"),
   targetScore: document.querySelector("#targetScore"),
@@ -41,16 +26,11 @@ const els = {
   scorecardBody: document.querySelector("#scorecardBody")
 };
 
-function authHeaders() {
-  return state.token ? { Authorization: `Bearer ${state.token}` } : {};
-}
-
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders(),
       ...(options.headers || {})
     }
   });
@@ -59,150 +39,11 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function setMessage(message) {
-  els.authMessage.textContent = message || "";
-}
-
-function renderAuth() {
-  if (state.user) {
-    els.signedOut.classList.add("hidden");
-    els.signedIn.classList.remove("hidden");
-    els.profileName.textContent = `${state.user.name} • HI ${state.user.handicapIndex || "not set"}`;
-    if (state.user.handicapIndex !== "" && state.user.handicapIndex !== null) {
-      els.handicapInput.value = state.user.handicapIndex;
-    }
-  } else {
-    els.signedOut.classList.remove("hidden");
-    els.signedIn.classList.add("hidden");
-  }
-}
-
-async function register() {
-  try {
-    const payload = await api("/api/register", {
-      method: "POST",
-      body: JSON.stringify({
-        name: els.nameInput.value,
-        email: els.emailInput.value,
-        password: els.passwordInput.value,
-        handicapIndex: els.handicapInput.value
-      })
-    });
-    state.token = payload.token;
-    state.user = payload.user;
-    localStorage.setItem("golfToken", state.token);
-    primePreferredSetup();
-    setMessage("Account created.");
-    renderAuth();
-    calculate();
-  } catch (error) {
-    setMessage(error.message);
-  }
-}
-
-async function login() {
-  try {
-    const payload = await api("/api/login", {
-      method: "POST",
-      body: JSON.stringify({
-        email: els.emailInput.value,
-        password: els.passwordInput.value
-      })
-    });
-    state.token = payload.token;
-    state.user = payload.user;
-    localStorage.setItem("golfToken", state.token);
-    primePreferredSetup();
-    setMessage("Signed in.");
-    renderAuth();
-    await searchCourses();
-  } catch (error) {
-    setMessage(error.message);
-  }
-}
-
-async function logout() {
-  try {
-    await api("/api/logout", { method: "POST" });
-  } catch {
-    // Local logout still clears the browser session if the server token has expired.
-  }
-  state.token = "";
-  state.user = null;
-  localStorage.removeItem("golfToken");
-  setMessage("Signed out.");
-  renderAuth();
-}
-
-async function loadMe() {
-  if (!state.token) return;
-  try {
-    const payload = await api("/api/me");
-    state.user = payload.user;
-    primePreferredSetup();
-    renderAuth();
-  } catch {
-    state.token = "";
-    localStorage.removeItem("golfToken");
-  }
-}
-
-async function saveProfile() {
-  if (!state.user) {
-    setMessage("Create an account or log in to save your setup.");
-    return;
-  }
-  try {
-    const course = state.selectedCourse;
-    const tee = state.selectedTee;
-    const payload = await api("/api/me", {
-      method: "PATCH",
-      body: JSON.stringify({
-        handicapIndex: els.handicapInput.value,
-        preferredCourseId: course?.id || "",
-        preferredCourseName: course?.name || "",
-        preferredCourseState: course?.state || "",
-        preferredTeeId: tee?.id || "",
-        preferredTeeName: tee?.name || ""
-      })
-    });
-    state.user = payload.user;
-    setMessage("Setup saved.");
-    renderAuth();
-  } catch (error) {
-    setMessage(error.message);
-  }
-}
-
-function primePreferredSetup() {
-  if (!state.user) return;
-  state.pendingPreferredCourseId = state.user.preferredCourseId || "";
-  state.pendingPreferredTeeId = state.user.preferredTeeId || "";
-  if (state.user.preferredCourseName) {
-    els.courseSearch.value = state.user.preferredCourseName;
-  }
-  if (state.user.preferredCourseState) {
-    els.stateSelect.value = state.user.preferredCourseState;
-  }
-}
-
-function applyPreferredSetup() {
-  if (state.pendingPreferredCourseId) {
-    const course = state.courses.find(item => item.id === state.pendingPreferredCourseId);
-    if (course) {
-      els.courseSelect.value = course.id;
-      state.pendingPreferredCourseId = "";
-      return true;
-    }
-  }
-  return false;
-}
-
 async function searchCourses() {
   els.courseSelect.innerHTML = "<option>Searching...</option>";
   els.courseSelect.disabled = true;
   els.teeSelect.disabled = true;
-  els.courseDataMessage.textContent = "Searching live U.S. course data...";
+  els.courseDataMessage.textContent = "Searching available U.S. course data...";
   try {
     const params = new URLSearchParams({
       q: els.courseSearch.value.trim(),
@@ -241,12 +82,10 @@ function renderCourses() {
   for (const course of state.courses) {
     const option = document.createElement("option");
     option.value = course.id;
-    const source = course.source === "live" ? "Live" : "Sample";
-    option.textContent = `${[course.name, course.city, course.state].filter(Boolean).join(" • ")} (${source})`;
+    option.textContent = [course.name, course.city, course.state].filter(Boolean).join(" • ");
     els.courseSelect.append(option);
   }
-  const appliedPreference = applyPreferredSetup();
-  if (state.courseBrowseMode && !appliedPreference) {
+  if (state.courseBrowseMode) {
     els.courseSelect.selectedIndex = -1;
     state.selectedCourse = null;
     clearPlayableDataOnly();
@@ -289,13 +128,6 @@ function renderTees() {
     const yardage = tee.yardage ? ` • ${tee.yardage} yds` : "";
     option.textContent = `${tee.name} ${tee.gender ? `(${tee.gender})` : ""} • ${tee.rating}/${tee.slope}${yardage}`;
     els.teeSelect.append(option);
-  }
-  if (state.pendingPreferredTeeId) {
-    const tee = state.selectedCourse.tees.find(item => item.id === state.pendingPreferredTeeId);
-    if (tee) {
-      els.teeSelect.value = tee.id;
-      state.pendingPreferredTeeId = "";
-    }
   }
   selectTee();
   renderTeeComparison();
@@ -501,10 +333,6 @@ async function loadGhinStatus() {
   els.ghinStatus.textContent = payload.message;
 }
 
-els.registerBtn.addEventListener("click", register);
-els.loginBtn.addEventListener("click", login);
-els.logoutBtn.addEventListener("click", logout);
-els.saveProfileBtn.addEventListener("click", saveProfile);
 els.searchBtn.addEventListener("click", searchCourses);
 els.stateSelect.addEventListener("change", searchCourses);
 els.courseSelect.addEventListener("change", selectCourse);
@@ -523,6 +351,4 @@ els.courseSearch.addEventListener("keydown", event => {
   if (event.key === "Enter") searchCourses();
 });
 
-Promise.all([loadMe(), loadGhinStatus()])
-  .then(() => searchCourses())
-  .then(() => renderAuth());
+Promise.all([loadGhinStatus(), searchCourses()]);

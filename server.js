@@ -8,12 +8,13 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "127.0.0.1";
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
-const DATA_DIR = path.join(ROOT, "data");
-const USER_FILE = path.join(DATA_DIR, "users.json");
 const OPEN_GOLF_BASE_URL = "https://api.opengolfapi.org/v1";
 const OPEN_GOLF_SEARCH_LIMIT = 10;
+const OPEN_GOLF_BROWSE_LIMIT = 50;
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 
-const sessions = new Map();
+const courseCache = new Map();
+const searchCache = new Map();
 
 const sampleCourses = [
   {
@@ -88,25 +89,6 @@ const sampleCourses = [
   }
 ];
 
-async function ensureDataFile() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  try {
-    await fs.access(USER_FILE);
-  } catch {
-    await fs.writeFile(USER_FILE, JSON.stringify({ users: [] }, null, 2));
-  }
-}
-
-async function readUsers() {
-  await ensureDataFile();
-  const raw = await fs.readFile(USER_FILE, "utf8");
-  return JSON.parse(raw);
-}
-
-async function writeUsers(data) {
-  await fs.writeFile(USER_FILE, JSON.stringify(data, null, 2));
-}
-
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
@@ -114,71 +96,6 @@ function json(res, status, payload) {
     "Content-Length": Buffer.byteLength(body)
   });
   res.end(body);
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", chunk => {
-      body += chunk;
-      if (body.length > 1_000_000) {
-        reject(new Error("Request body too large"));
-        req.destroy();
-      }
-    });
-    req.on("end", () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
-}
-
-function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
-  const hash = crypto.pbkdf2Sync(password, salt, 120000, 32, "sha256").toString("hex");
-  return { salt, hash };
-}
-
-function verifyPassword(password, user) {
-  const next = hashPassword(password, user.salt);
-  return crypto.timingSafeEqual(Buffer.from(next.hash, "hex"), Buffer.from(user.passwordHash, "hex"));
-}
-
-function publicUser(user) {
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    handicapIndex: user.handicapIndex ?? "",
-    preferredCourseId: user.preferredCourseId || "",
-    preferredCourseName: user.preferredCourseName || "",
-    preferredCourseState: user.preferredCourseState || "",
-    preferredTeeId: user.preferredTeeId || "",
-    preferredTeeName: user.preferredTeeName || ""
-  };
-}
-
-function getSessionUserId(req) {
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  return sessions.get(token);
-}
-
-async function requireUser(req, res) {
-  const userId = getSessionUserId(req);
-  if (!userId) {
-    json(res, 401, { error: "Not signed in" });
-    return null;
-  }
-  const data = await readUsers();
-  const user = data.users.find(item => item.id === userId);
-  if (!user) {
-    json(res, 401, { error: "Session user not found" });
-    return null;
-  }
-  return { data, user };
 }
 
 function normalizeCourse(raw, teePayload = null) {
@@ -267,6 +184,7 @@ function sampleCourseMatches(query, stateFilter = "") {
 }
 
 async function hydrateOpenGolfCourse(summary) {
+  if (courseCache.has(summary.id)) return courseCache.get(summary.id);
   try {
     const id = encodeURIComponent(summary.id);
     const [detail, tees] = await Promise.all([
@@ -274,31 +192,42 @@ async function hydrateOpenGolfCourse(summary) {
       fetchOpenGolf(`/courses/${id}/tees`)
     ]);
     const course = normalizeCourse({ ...summary, ...detail }, tees);
-    return course.tees.length ? course : null;
+    const playableCourse = course.tees.length ? course : null;
+    courseCache.set(summary.id, playableCourse);
+    return playableCourse;
   } catch {
+    courseCache.set(summary.id, null);
     return null;
   }
 }
 
 async function searchCourses(query, stateFilter = "") {
+  const cacheKey = `${query.toLowerCase()}|${stateFilter}`;
+  const cachedSearch = searchCache.get(cacheKey);
+  if (cachedSearch && Date.now() - cachedSearch.cachedAt < SEARCH_CACHE_TTL_MS) {
+    return cachedSearch.payload;
+  }
+
+  let payload;
   if (!query || query.length < 2) {
     try {
       const data = await fetchOpenGolf("/courses/search?q=");
       const list = Array.isArray(data) ? data : data.courses || data.results || [];
       const filteredList = stateFilter ? list.filter(course => course.state === stateFilter) : list;
-      const courses = filteredList.map(normalizeCourseSummary);
-      return {
+      const candidates = filteredList.slice(0, OPEN_GOLF_BROWSE_LIMIT).map(normalizeCourseSummary);
+      const courses = (await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean);
+      payload = {
         courses,
         meta: {
           source: "browse",
           searchedCount: filteredList.length,
           message: courses.length
-            ? `Browsing ${courses.length} live course${courses.length === 1 ? "" : "s"}${stateFilter ? ` in ${stateFilter}` : ""}. Select one to load tees.`
-            : `No live U.S. courses were found${stateFilter ? ` in ${stateFilter}` : ""}.`
+            ? `Browsing ${courses.length} course${courses.length === 1 ? "" : "s"} with tee and scorecard data${stateFilter ? ` in ${stateFilter}` : ""}.`
+            : `No U.S. courses with tee and scorecard data were found${stateFilter ? ` in ${stateFilter}` : ""}.`
         }
       };
     } catch (error) {
-      return {
+      payload = {
         courses: stateFilter ? sampleCourses.filter(course => course.state === stateFilter) : sampleCourses,
         meta: {
           source: "sample",
@@ -307,6 +236,8 @@ async function searchCourses(query, stateFilter = "") {
         }
       };
     }
+    searchCache.set(cacheKey, { cachedAt: Date.now(), payload });
+    return payload;
   }
 
   const samples = sampleCourseMatches(query, stateFilter);
@@ -318,31 +249,33 @@ async function searchCourses(query, stateFilter = "") {
     const hydrated = (await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean);
 
     if (hydrated.length) {
-      return {
+      payload = {
         courses: hydrated,
         meta: {
           source: "live",
           liveCount: hydrated.length,
           searchedCount: filteredList.length,
           skippedCount: Math.max(filteredList.length - hydrated.length, 0),
-          message: `Showing ${hydrated.length} live course${hydrated.length === 1 ? "" : "s"} with complete tee and scorecard data${stateFilter ? ` in ${stateFilter}` : ""}.`
+          message: `Showing ${hydrated.length} course${hydrated.length === 1 ? "" : "s"} with tee and scorecard data${stateFilter ? ` in ${stateFilter}` : ""}.`
         }
       };
+      searchCache.set(cacheKey, { cachedAt: Date.now(), payload });
+      return payload;
     }
 
-    return {
+    payload = {
       courses: [],
       meta: {
         source: "empty",
         searchedCount: filteredList.length,
         skippedCount: filteredList.length,
         message: filteredList.length
-          ? "Live matches were found, but none had both tee ratings and an 18-hole scorecard yet."
-          : `No live U.S. course matches were found${stateFilter ? ` in ${stateFilter}` : ""}.`
+          ? "Matches were found, but none had both tee ratings and an 18-hole scorecard yet."
+          : `No U.S. course matches were found${stateFilter ? ` in ${stateFilter}` : ""}.`
       }
     };
   } catch (error) {
-    return {
+    payload = {
       courses: samples,
       meta: {
         source: samples.length ? "sample" : "error",
@@ -353,107 +286,29 @@ async function searchCourses(query, stateFilter = "") {
       }
     };
   }
+  searchCache.set(cacheKey, { cachedAt: Date.now(), payload });
+  return payload;
 }
 
 async function getCourse(id) {
   const sample = sampleCourses.find(course => course.id === id);
   if (sample) return sample;
+  if (courseCache.has(id)) return courseCache.get(id);
   try {
     const encodedId = encodeURIComponent(id);
     const [detail, tees] = await Promise.all([
       fetchOpenGolf(`/courses/${encodedId}`),
       fetchOpenGolf(`/courses/${encodedId}/tees`)
     ]);
-    return normalizeCourse(detail, tees);
+    const course = normalizeCourse(detail, tees);
+    courseCache.set(id, course.tees.length ? course : null);
+    return course.tees.length ? course : null;
   } catch {
     return null;
   }
 }
 
 async function handleApi(req, res, url) {
-  if (url.pathname === "/api/register" && req.method === "POST") {
-    const body = await readBody(req);
-    const email = String(body.email || "").trim().toLowerCase();
-    const password = String(body.password || "");
-    const name = String(body.name || "").trim();
-    const handicapIndex = body.handicapIndex === "" ? "" : Number(body.handicapIndex);
-
-    if (!name || !email || password.length < 8) {
-      json(res, 400, { error: "Name, email, and an 8+ character password are required." });
-      return;
-    }
-
-    const data = await readUsers();
-    if (data.users.some(user => user.email === email)) {
-      json(res, 409, { error: "An account with that email already exists." });
-      return;
-    }
-
-    const passwordParts = hashPassword(password);
-    const user = {
-      id: crypto.randomUUID(),
-      name,
-      email,
-      handicapIndex,
-      salt: passwordParts.salt,
-      passwordHash: passwordParts.hash,
-      createdAt: new Date().toISOString()
-    };
-    data.users.push(user);
-    await writeUsers(data);
-    const token = crypto.randomBytes(32).toString("hex");
-    sessions.set(token, user.id);
-    json(res, 201, { token, user: publicUser(user) });
-    return;
-  }
-
-  if (url.pathname === "/api/login" && req.method === "POST") {
-    const body = await readBody(req);
-    const email = String(body.email || "").trim().toLowerCase();
-    const password = String(body.password || "");
-    const data = await readUsers();
-    const user = data.users.find(item => item.email === email);
-    if (!user || !verifyPassword(password, user)) {
-      json(res, 401, { error: "Invalid email or password." });
-      return;
-    }
-    const token = crypto.randomBytes(32).toString("hex");
-    sessions.set(token, user.id);
-    json(res, 200, { token, user: publicUser(user) });
-    return;
-  }
-
-  if (url.pathname === "/api/me" && req.method === "GET") {
-    const session = await requireUser(req, res);
-    if (!session) return;
-    json(res, 200, { user: publicUser(session.user) });
-    return;
-  }
-
-  if (url.pathname === "/api/me" && req.method === "PATCH") {
-    const session = await requireUser(req, res);
-    if (!session) return;
-    const body = await readBody(req);
-    if (body.name !== undefined) session.user.name = String(body.name).trim();
-    if (body.handicapIndex !== undefined) session.user.handicapIndex = body.handicapIndex === "" ? "" : Number(body.handicapIndex);
-    if (body.preferredCourseId !== undefined) session.user.preferredCourseId = String(body.preferredCourseId || "");
-    if (body.preferredCourseName !== undefined) session.user.preferredCourseName = String(body.preferredCourseName || "");
-    if (body.preferredCourseState !== undefined) session.user.preferredCourseState = String(body.preferredCourseState || "");
-    if (body.preferredTeeId !== undefined) session.user.preferredTeeId = String(body.preferredTeeId || "");
-    if (body.preferredTeeName !== undefined) session.user.preferredTeeName = String(body.preferredTeeName || "");
-    await writeUsers(session.data);
-    json(res, 200, { user: publicUser(session.user) });
-    return;
-  }
-
-  if (url.pathname === "/api/logout" && req.method === "POST") {
-    const header = req.headers.authorization || "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-    sessions.delete(token);
-    json(res, 200, { ok: true });
-    return;
-  }
-
   if (url.pathname === "/api/courses" && req.method === "GET") {
     const query = url.searchParams.get("q") || "";
     const stateFilter = (url.searchParams.get("state") || "").trim().toUpperCase();
@@ -527,8 +382,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-ensureDataFile().then(() => {
-  server.listen(PORT, HOST, () => {
-    console.log(`Golf Handicap App running at http://${HOST}:${PORT}`);
-  });
+server.listen(PORT, HOST, () => {
+  console.log(`Golf Handicap App running at http://${HOST}:${PORT}`);
 });

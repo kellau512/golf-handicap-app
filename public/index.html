@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Golf Handicap App</title>
-    <link rel="stylesheet" href="/styles.css?v=20260604">
+    <link rel="stylesheet" href="/styles.css?v=20260605">
   </head>
   <body>
     <main class="app-shell">
@@ -12,20 +12,6 @@
         <div>
           <p class="eyebrow">US handicap calculator</p>
           <h1>Golf Handicap App</h1>
-        </div>
-        <div class="account-panel">
-          <div id="signedOut" class="auth-grid">
-            <input id="nameInput" type="text" placeholder="Name" autocomplete="name">
-            <input id="emailInput" type="email" placeholder="Email" autocomplete="email">
-            <input id="passwordInput" type="password" placeholder="Password" autocomplete="current-password">
-            <button id="registerBtn" type="button">Register</button>
-            <button id="loginBtn" type="button" class="secondary">Log in</button>
-          </div>
-          <div id="signedIn" class="profile hidden">
-            <span id="profileName"></span>
-            <button id="logoutBtn" type="button" class="secondary">Log out</button>
-          </div>
-          <p id="authMessage" class="message"></p>
         </div>
       </section>
 
@@ -114,8 +100,6 @@
 
           <div id="courseDetails" class="course-details"></div>
 
-          <button id="saveProfileBtn" type="button" class="save-button">Save Setup</button>
-
           <div class="ghin-box">
             <strong>GHIN sync</strong>
             <p id="ghinStatus">Checking integration status...</p>
@@ -145,7 +129,7 @@
           <div class="tee-comparison" id="teeComparison"></div>
 
           <div class="calc-panel">
-            <div>
+            <div class="formula-help" title="Course Handicap adjusts your Handicap Index for this tee's slope difficulty and the difference between course rating and par.">
               <span>Course Handicap Formula</span>
               <strong id="courseFormula">--</strong>
             </div>
@@ -177,6 +161,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260604"></script>
+    <script src="/app.js?v=20260605"></script>
   </body>
 </html>
