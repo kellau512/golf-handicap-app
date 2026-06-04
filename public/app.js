@@ -231,8 +231,7 @@ function renderCourseDetails() {
   const details = [
     [course.courseType, "Type"],
     [course.address, "Address"],
-    [course.holesCount ? `${course.holesCount} holes` : "", "Holes"],
-    [course.source === "live" ? "Live data" : "Sample data", "Source"]
+    [course.holesCount ? `${course.holesCount} holes` : "", "Holes"]
   ].filter(([value]) => value);
 
   els.courseDetails.innerHTML = details.map(([value, label]) => `
