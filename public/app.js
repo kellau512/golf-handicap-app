@@ -31,6 +31,7 @@ const els = {
   targetScore: document.querySelector("#targetScore"),
   ratingSlope: document.querySelector("#ratingSlope"),
   totalPar: document.querySelector("#totalPar"),
+  teeComparison: document.querySelector("#teeComparison"),
   courseFormula: document.querySelector("#courseFormula"),
   targetFormula: document.querySelector("#targetFormula"),
   strokeSummary: document.querySelector("#strokeSummary"),
@@ -220,6 +221,7 @@ function renderTees() {
     els.teeSelect.append(option);
   }
   selectTee();
+  renderTeeComparison();
 }
 
 function renderCourseDetails() {
@@ -246,6 +248,7 @@ function selectTee() {
   if (!state.selectedCourse) return;
   state.selectedTee = state.selectedCourse.tees.find(tee => tee.id === els.teeSelect.value) || state.selectedCourse.tees[0] || null;
   calculate();
+  renderTeeComparison();
 }
 
 function strokesForHole(courseHandicap, allocation) {
@@ -286,11 +289,7 @@ function escapeHtml(value) {
   }[char]));
 }
 
-function calculate() {
-  const tee = state.selectedTee;
-  const handicapIndex = Number(els.handicapInput.value);
-  if (!tee || Number.isNaN(handicapIndex)) return;
-
+function calculateTeeResult(tee, handicapIndex) {
   const totalPar = tee.holes.reduce((sum, hole) => sum + hole.par, 0);
   const slopeAdjustment = handicapIndex * (tee.slope / 113);
   const ratingAdjustment = tee.rating - totalPar;
@@ -299,17 +298,58 @@ function calculate() {
   const rawTargetScore = tee.rating + courseHandicap;
   const targetScore = Math.round(rawTargetScore);
 
-  els.courseHandicap.textContent = String(courseHandicap);
-  els.targetScore.textContent = String(targetScore);
+  return {
+    totalPar,
+    slopeAdjustment,
+    ratingAdjustment,
+    rawCourseHandicap,
+    courseHandicap,
+    rawTargetScore,
+    targetScore
+  };
+}
+
+function renderTeeComparison() {
+  const course = state.selectedCourse;
+  const handicapIndex = Number(els.handicapInput.value);
+  if (!course || Number.isNaN(handicapIndex) || !course.tees.length) {
+    els.teeComparison.innerHTML = "";
+    return;
+  }
+
+  els.teeComparison.innerHTML = course.tees.map(tee => {
+    const result = calculateTeeResult(tee, handicapIndex);
+    const selectedClass = state.selectedTee?.id === tee.id ? " selected" : "";
+    const yardage = tee.yardage ? `${tee.yardage} yds` : "Yardage n/a";
+    return `
+      <button class="tee-card${selectedClass}" type="button" data-tee-id="${escapeHtml(tee.id)}">
+        <span>${escapeHtml(tee.name)}${tee.gender ? ` (${escapeHtml(tee.gender)})` : ""}</span>
+        <strong>${result.courseHandicap} CH / ${result.targetScore} target</strong>
+        <small>${formatNumber(tee.rating)} rating • ${tee.slope} slope • ${escapeHtml(yardage)}</small>
+      </button>
+    `;
+  }).join("");
+}
+
+function calculate() {
+  const tee = state.selectedTee;
+  const handicapIndex = Number(els.handicapInput.value);
+  if (!tee || Number.isNaN(handicapIndex)) return;
+
+  const result = calculateTeeResult(tee, handicapIndex);
+
+  els.courseHandicap.textContent = String(result.courseHandicap);
+  els.targetScore.textContent = String(result.targetScore);
   els.ratingSlope.textContent = `${tee.rating} / ${tee.slope}`;
-  els.totalPar.textContent = String(totalPar);
-  els.courseFormula.textContent = `${formatNumber(handicapIndex)} × ${tee.slope} / 113 ${formatSigned(ratingAdjustment)} = ${formatNumber(rawCourseHandicap)} → ${courseHandicap}`;
-  els.targetFormula.textContent = `${formatNumber(tee.rating)} + ${courseHandicap} = ${formatNumber(rawTargetScore)} → ${targetScore}`;
-  els.strokeSummary.textContent = summarizeStrokes(courseHandicap);
+  els.totalPar.textContent = String(result.totalPar);
+  els.courseFormula.textContent = `${formatNumber(handicapIndex)} × ${tee.slope} / 113 ${formatSigned(result.ratingAdjustment)} = ${formatNumber(result.rawCourseHandicap)} → ${result.courseHandicap}`;
+  els.targetFormula.textContent = `${formatNumber(tee.rating)} + ${result.courseHandicap} = ${formatNumber(result.rawTargetScore)} → ${result.targetScore}`;
+  els.strokeSummary.textContent = summarizeStrokes(result.courseHandicap);
+  renderTeeComparison();
 
   els.scorecardBody.innerHTML = "";
   for (const hole of tee.holes) {
-    const strokes = strokesForHole(courseHandicap, hole.handicap);
+    const strokes = strokesForHole(result.courseHandicap, hole.handicap);
     const target = hole.par + strokes;
     const row = document.createElement("tr");
     row.innerHTML = `
@@ -334,6 +374,7 @@ function clearScorecard() {
   els.courseFormula.textContent = "--";
   els.targetFormula.textContent = "--";
   els.strokeSummary.textContent = "--";
+  els.teeComparison.innerHTML = "";
   els.courseDetails.innerHTML = "";
   els.scorecardBody.innerHTML = `
     <tr>
@@ -355,7 +396,16 @@ els.searchBtn.addEventListener("click", searchCourses);
 els.stateSelect.addEventListener("change", searchCourses);
 els.courseSelect.addEventListener("change", selectCourse);
 els.teeSelect.addEventListener("change", selectTee);
-els.handicapInput.addEventListener("input", calculate);
+els.handicapInput.addEventListener("input", () => {
+  calculate();
+  renderTeeComparison();
+});
+els.teeComparison.addEventListener("click", event => {
+  const card = event.target.closest(".tee-card");
+  if (!card) return;
+  els.teeSelect.value = card.dataset.teeId;
+  selectTee();
+});
 els.courseSearch.addEventListener("keydown", event => {
   if (event.key === "Enter") searchCourses();
 });
