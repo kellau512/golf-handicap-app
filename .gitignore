@@ -2,4 +2,6 @@ node_modules/
 .DS_Store
 data/users.json
 data/course-snapshot-*.json
+data/course-index.json
+data/course-detail-*.json
 *.log

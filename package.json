@@ -5,7 +5,8 @@
   "description": "Local golf handicap calculator with snapshotted course lookup.",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "refresh:courses": "node server.js --refresh-course-index"
   },
   "engines": {
     "node": ">=18"

@@ -74,7 +74,7 @@ function renderCourses() {
   }
   if (!state.courses.length) {
     const option = document.createElement("option");
-    option.textContent = "No playable courses found";
+    option.textContent = "No courses found";
     els.courseSelect.append(option);
     clearScorecard();
     return;
@@ -304,7 +304,7 @@ function clearScorecard() {
   clearPlayableDataOnly();
   els.scorecardBody.innerHTML = `
     <tr>
-      <td colspan="5">Search for a course with complete tee ratings and an 18-hole scorecard.</td>
+      <td colspan="5">Search for a course, then select it to load tee ratings and scorecard data.</td>
     </tr>
   `;
 }
@@ -323,7 +323,7 @@ function clearPlayableDataOnly() {
   els.courseDetails.innerHTML = "";
   els.scorecardBody.innerHTML = `
     <tr>
-      <td colspan="5">Select a course with tee ratings to load the scorecard.</td>
+      <td colspan="5">Select a course to load tee ratings and scorecard data.</td>
     </tr>
   `;
 }

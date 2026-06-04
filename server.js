@@ -14,10 +14,21 @@ const OPEN_GOLF_SEARCH_LIMIT = 10;
 const DEFAULT_BROWSE_STATE = "CA";
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
+const COURSE_INDEX_FILE = path.join(DATA_DIR, "course-index.json");
+const COURSE_INDEX_REFRESH_MS = 24 * 60 * 60 * 1000;
 
 const courseCache = new Map();
 const searchCache = new Map();
-const snapshotRefreshes = new Map();
+let courseIndexRefresh = null;
+let openGolfBackoffUntil = 0;
+
+const STATE_CODES = [
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
+];
 
 const sampleCourses = [
   {
@@ -166,16 +177,33 @@ function normalizeCourseSummary(raw) {
 }
 
 async function fetchOpenGolf(pathname, timeoutMs = 8000, retries = 1) {
+  if (Date.now() < openGolfBackoffUntil) {
+    throw new Error(`OpenGolfAPI rate limit is active until ${new Date(openGolfBackoffUntil).toISOString()}`);
+  }
+
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(`${OPEN_GOLF_BASE_URL}${pathname}`, { signal: controller.signal });
-      if (!response.ok) throw new Error(`OpenGolfAPI returned ${response.status}`);
+      if (!response.ok) {
+        const body = await response.text();
+        if (response.status === 429) {
+          try {
+            const payload = JSON.parse(body);
+            if (payload.resetAt) openGolfBackoffUntil = new Date(payload.resetAt).getTime();
+          } catch {
+            openGolfBackoffUntil = Date.now() + 60 * 60 * 1000;
+          }
+          throw new Error(`OpenGolfAPI daily rate limit exceeded${openGolfBackoffUntil ? ` until ${new Date(openGolfBackoffUntil).toISOString()}` : ""}`);
+        }
+        throw new Error(`OpenGolfAPI returned ${response.status}`);
+      }
       return response.json();
     } catch (error) {
       lastError = error;
+      if (String(error.message || "").includes("rate limit")) break;
     } finally {
       clearTimeout(timeout);
     }
@@ -200,8 +228,8 @@ function sortCoursesByName(courses) {
   });
 }
 
-function snapshotPath(state) {
-  return path.join(DATA_DIR, `course-snapshot-${state}.json`);
+function courseDetailPath(id) {
+  return path.join(DATA_DIR, `course-detail-${encodeURIComponent(id)}.json`);
 }
 
 function isFreshSnapshot(snapshot) {
@@ -209,18 +237,117 @@ function isFreshSnapshot(snapshot) {
   return Date.now() - new Date(snapshot.refreshedAt).getTime() < SNAPSHOT_TTL_MS;
 }
 
-async function readCourseSnapshot(state) {
+async function readCourseDetail(id) {
   try {
-    const raw = await fs.readFile(snapshotPath(state), "utf8");
+    const raw = await fs.readFile(courseDetailPath(id), "utf8");
+    const snapshot = JSON.parse(raw);
+    return isFreshSnapshot(snapshot) ? snapshot.course : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCourseDetail(course) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(courseDetailPath(course.id), JSON.stringify({
+    refreshedAt: new Date().toISOString(),
+    course
+  }, null, 2));
+}
+
+function isFreshCourseIndex(index) {
+  if (!index?.refreshedAt) return false;
+  return Date.now() - new Date(index.refreshedAt).getTime() < COURSE_INDEX_REFRESH_MS;
+}
+
+async function readCourseIndex() {
+  try {
+    const raw = await fs.readFile(COURSE_INDEX_FILE, "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 
-async function writeCourseSnapshot(snapshot) {
+async function writeCourseIndex(index) {
   await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(snapshotPath(snapshot.state), JSON.stringify(snapshot, null, 2));
+  await fs.writeFile(COURSE_INDEX_FILE, JSON.stringify(index, null, 2));
+}
+
+function coursesFromIndex(index, state) {
+  return sortCoursesByName(index?.states?.[state]?.courses || []);
+}
+
+function courseIndexHasData(index) {
+  return Boolean(index?.states && Object.values(index.states).some(entry => entry?.courses?.length));
+}
+
+async function refreshCourseIndex({ force = false } = {}) {
+  if (courseIndexRefresh) return courseIndexRefresh;
+
+  courseIndexRefresh = (async () => {
+    const previousIndex = await readCourseIndex();
+    if (!force && isFreshCourseIndex(previousIndex) && courseIndexHasData(previousIndex)) {
+      return previousIndex;
+    }
+
+    const states = previousIndex?.states ? { ...previousIndex.states } : {};
+    let refreshedStates = 0;
+
+    for (const state of STATE_CODES) {
+      try {
+        const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(state)}`);
+        const list = Array.isArray(data) ? data : data.courses || data.results || [];
+        const courses = sortCoursesByName(list.map(normalizeCourseSummary));
+        states[state] = {
+          refreshedAt: new Date().toISOString(),
+          searchedCount: data.count || list.length,
+          courses
+        };
+        refreshedStates += 1;
+      } catch (error) {
+        if (String(error.message || "").includes("rate limit")) throw error;
+        states[state] = states[state] || {
+          refreshedAt: null,
+          searchedCount: 0,
+          courses: []
+        };
+      }
+    }
+
+    const totalCourses = Object.values(states).reduce((sum, entry) => sum + (entry?.courses?.length || 0), 0);
+    const index = {
+      refreshedAt: new Date().toISOString(),
+      refreshedStates,
+      totalCourses,
+      states
+    };
+    if (courseIndexHasData(previousIndex) && totalCourses < previousIndex.totalCourses) {
+      return previousIndex;
+    }
+    await writeCourseIndex(index);
+    return index;
+  })().finally(() => {
+    courseIndexRefresh = null;
+  });
+
+  return courseIndexRefresh;
+}
+
+function refreshCourseIndexInBackground() {
+  refreshCourseIndex().catch(error => {
+    console.warn(`Course index refresh failed: ${error.message}`);
+  });
+}
+
+async function getCourseIndex() {
+  const index = await readCourseIndex();
+  if (isFreshCourseIndex(index) && courseIndexHasData(index)) return { index, status: "fresh" };
+  if (courseIndexHasData(index)) {
+    refreshCourseIndexInBackground();
+    return { index, status: "stale" };
+  }
+  return { index: await refreshCourseIndex(), status: "refreshed" };
 }
 
 async function hydrateCourseSummaries(candidates, batchSize = 10) {
@@ -231,48 +358,6 @@ async function hydrateCourseSummaries(candidates, batchSize = 10) {
     courses.push(...hydrated.filter(Boolean));
   }
   return sortCoursesByName(courses);
-}
-
-async function refreshCourseSnapshot(state) {
-  if (snapshotRefreshes.has(state)) return snapshotRefreshes.get(state);
-
-  const refresh = (async () => {
-    const previousSnapshot = await readCourseSnapshot(state);
-    const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(state)}`);
-    const list = Array.isArray(data) ? data : data.courses || data.results || [];
-    const candidates = list.map(normalizeCourseSummary);
-    const courses = await hydrateCourseSummaries(candidates);
-    if (previousSnapshot?.courses?.length && courses.length < previousSnapshot.courses.length) {
-      return previousSnapshot;
-    }
-    const snapshot = {
-      state,
-      refreshedAt: new Date().toISOString(),
-      searchedCount: data.count || list.length,
-      courses
-    };
-    await writeCourseSnapshot(snapshot);
-    return snapshot;
-  })().finally(() => snapshotRefreshes.delete(state));
-
-  snapshotRefreshes.set(state, refresh);
-  return refresh;
-}
-
-function refreshCourseSnapshotInBackground(state) {
-  refreshCourseSnapshot(state).catch(error => {
-    console.warn(`Course snapshot refresh failed for ${state}: ${error.message}`);
-  });
-}
-
-async function getBrowseSnapshot(state) {
-  const snapshot = await readCourseSnapshot(state);
-  if (isFreshSnapshot(snapshot)) return { snapshot, status: "fresh" };
-  if (snapshot?.courses?.length) {
-    refreshCourseSnapshotInBackground(state);
-    return { snapshot, status: "stale" };
-  }
-  return { snapshot: await refreshCourseSnapshot(state), status: "refreshed" };
 }
 
 async function hydrateOpenGolfCourse(summary) {
@@ -286,6 +371,7 @@ async function hydrateOpenGolfCourse(summary) {
     const course = normalizeCourse({ ...summary, ...detail }, tees);
     const playableCourse = course.tees.length ? course : null;
     courseCache.set(summary.id, playableCourse);
+    if (playableCourse) await writeCourseDetail(playableCourse);
     return playableCourse;
   } catch {
     return null;
@@ -303,18 +389,19 @@ async function searchCourses(query, stateFilter = "") {
   let payload;
   if (!query || query.length < 2) {
     try {
-      const { snapshot, status } = await getBrowseSnapshot(browseState);
-      const courses = sortCoursesByName(snapshot.courses || []);
+      const { index, status } = await getCourseIndex();
+      const courses = coursesFromIndex(index, browseState);
+      const stateIndex = index.states?.[browseState] || {};
       payload = {
         courses,
         meta: {
           source: "browse",
-          snapshotStatus: status,
-          refreshedAt: snapshot.refreshedAt,
-          searchedCount: snapshot.searchedCount || courses.length,
+          indexStatus: status,
+          refreshedAt: stateIndex.refreshedAt || index.refreshedAt,
+          searchedCount: stateIndex.searchedCount || courses.length,
           message: courses.length
-            ? `Browsing ${courses.length} course${courses.length === 1 ? "" : "s"} with tee and scorecard data in ${browseState}.`
-            : `No courses with tee and scorecard data were found in ${browseState}.`
+            ? `Browsing ${courses.length} course${courses.length === 1 ? "" : "s"} in ${browseState} from the daily course index.`
+            : `No courses were found in ${browseState}.`
         }
       };
     } catch (error) {
@@ -322,7 +409,7 @@ async function searchCourses(query, stateFilter = "") {
         courses: [],
         meta: {
           source: "error",
-          message: `Course snapshot is unavailable and OpenGolfAPI could not refresh ${browseState} course data right now.`,
+          message: `Course index is unavailable and OpenGolfAPI could not refresh course data right now.`,
           error: error.message
         }
       };
@@ -333,22 +420,23 @@ async function searchCourses(query, stateFilter = "") {
   }
 
   const normalizedQuery = query.toLowerCase();
-  const browseSnapshot = await readCourseSnapshot(browseState);
-  const snapshotMatches = browseSnapshot?.courses?.filter(course => {
+  const browseIndex = await readCourseIndex();
+  const indexCourses = browseState ? coursesFromIndex(browseIndex, browseState) : STATE_CODES.flatMap(state => coursesFromIndex(browseIndex, state));
+  const indexMatches = indexCourses.filter(course => {
     return [course.name, course.city, course.state].some(value => String(value || "").toLowerCase().includes(normalizedQuery));
-  }) || [];
-  if (snapshotMatches.length) {
+  });
+  if (indexMatches.length) {
     payload = {
-      courses: sortCoursesByName(snapshotMatches),
+      courses: sortCoursesByName(indexMatches),
       meta: {
         source: "browse",
-        snapshotStatus: isFreshSnapshot(browseSnapshot) ? "fresh" : "stale",
-        refreshedAt: browseSnapshot.refreshedAt,
-        searchedCount: browseSnapshot.searchedCount || browseSnapshot.courses.length,
-        message: `Showing ${snapshotMatches.length} saved course${snapshotMatches.length === 1 ? "" : "s"} with tee and scorecard data in ${browseState}.`
+        indexStatus: isFreshCourseIndex(browseIndex) ? "fresh" : "stale",
+        refreshedAt: browseIndex.refreshedAt,
+        searchedCount: indexCourses.length,
+        message: `Showing ${indexMatches.length} saved course${indexMatches.length === 1 ? "" : "s"} in ${browseState} from the daily course index.`
       }
     };
-    if (!isFreshSnapshot(browseSnapshot)) refreshCourseSnapshotInBackground(browseState);
+    if (!isFreshCourseIndex(browseIndex)) refreshCourseIndexInBackground();
     searchCache.set(cacheKey, { cachedAt: Date.now(), payload });
     return payload;
   }
@@ -408,12 +496,8 @@ async function getCourse(id) {
   const sample = sampleCourses.find(course => course.id === id);
   if (sample) return sample;
   if (courseCache.has(id)) return courseCache.get(id);
-  const snapshot = await readCourseSnapshot(DEFAULT_BROWSE_STATE);
-  const snapshottedCourse = snapshot?.courses?.find(course => course.id === id);
-  if (snapshottedCourse) {
-    courseCache.set(id, snapshottedCourse);
-    return snapshottedCourse;
-  }
+  const cachedDetail = await readCourseDetail(id);
+  if (cachedDetail) return cachedDetail;
   try {
     const encodedId = encodeURIComponent(id);
     const [detail, tees] = await Promise.all([
@@ -422,7 +506,9 @@ async function getCourse(id) {
     ]);
     const course = normalizeCourse(detail, tees);
     courseCache.set(id, course.tees.length ? course : null);
-    return course.tees.length ? course : null;
+    if (!course.tees.length) return null;
+    await writeCourseDetail(course);
+    return course;
   } catch {
     return null;
   }
@@ -451,6 +537,19 @@ async function handleApi(req, res, url) {
     json(res, 200, {
       available: false,
       message: "GHIN does not publish a broadly available public developer API. Approved partner access is required before official Handicap Index sync can be enabled."
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/course-index/status" && req.method === "GET") {
+    const index = await readCourseIndex();
+    json(res, 200, {
+      available: courseIndexHasData(index),
+      fresh: isFreshCourseIndex(index),
+      refreshedAt: index?.refreshedAt || null,
+      refreshedStates: index?.refreshedStates || 0,
+      totalCourses: index?.totalCourses || 0,
+      openGolfBackoffUntil: openGolfBackoffUntil ? new Date(openGolfBackoffUntil).toISOString() : null
     });
     return;
   }
@@ -502,6 +601,23 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Golf Handicap App running at http://${HOST}:${PORT}`);
-});
+function scheduleCourseIndexRefresh() {
+  refreshCourseIndexInBackground();
+  setInterval(refreshCourseIndexInBackground, COURSE_INDEX_REFRESH_MS);
+}
+
+if (process.argv.includes("--refresh-course-index")) {
+  refreshCourseIndex({ force: true })
+    .then(index => {
+      console.log(`Course index refreshed: ${index.totalCourses || 0} courses across ${index.refreshedStates || 0} states.`);
+    })
+    .catch(error => {
+      console.error(`Course index refresh failed: ${error.message}`);
+      process.exitCode = 1;
+    });
+} else {
+  server.listen(PORT, HOST, () => {
+    console.log(`Golf Handicap App running at http://${HOST}:${PORT}`);
+    scheduleCourseIndexRefresh();
+  });
+}

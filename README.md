@@ -5,8 +5,9 @@ A local web app for U.S. golfers to calculate a course-specific target score fro
 ## Features
 
 - Manual Handicap Index entry
-- Daily local course snapshot for fast California browsing
-- Live course search through OpenGolfAPI when the local snapshot has no match
+- Daily local all-state course index for fast browsing
+- Tee and scorecard detail caching after a course is selected
+- Live course search through OpenGolfAPI when the local index has no match
 - Fallback U.S. sample courses for offline/local testing
 - Course Handicap calculation
 - Target gross score calculation
@@ -25,7 +26,15 @@ No package install is required for the current prototype because it uses Node's 
 
 ## Course Data
 
-The app stores generated course snapshots in `data/course-snapshot-*.json`. A fresh snapshot is reused for 24 hours. If an older snapshot exists, the app serves it immediately and refreshes the data in the background; if no snapshot exists yet, the first browse request builds one from OpenGolfAPI.
+The app stores a daily all-state course index in `data/course-index.json`. That index uses one OpenGolfAPI state-list request per state, so a full refresh is about 50 API calls instead of hydrating every course up front.
+
+The server refreshes the index in the background on startup and then once every 24 hours. You can also run a manual refresh:
+
+```bash
+npm run refresh:courses
+```
+
+Selected course tee and scorecard details are cached separately in `data/course-detail-*.json` after they are loaded. Those detail files are reused for 24 hours.
 
 ## GHIN Integration Note
 
