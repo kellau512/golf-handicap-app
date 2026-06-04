@@ -456,7 +456,12 @@ async function serveStatic(req, res, url) {
       ".js": "text/javascript; charset=utf-8",
       ".svg": "image/svg+xml"
     };
-    res.writeHead(200, { "Content-Type": contentTypes[ext] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": contentTypes[ext] || "application/octet-stream",
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0"
+    });
     res.end(file);
   } catch {
     res.writeHead(404);
