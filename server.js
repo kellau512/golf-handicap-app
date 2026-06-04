@@ -183,6 +183,14 @@ function sampleCourseMatches(query, stateFilter = "") {
   });
 }
 
+function sortCoursesByName(courses) {
+  return [...courses].sort((a, b) => {
+    const nameCompare = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    if (nameCompare) return nameCompare;
+    return `${a.city || ""} ${a.state || ""}`.localeCompare(`${b.city || ""} ${b.state || ""}`, undefined, { sensitivity: "base" });
+  });
+}
+
 async function hydrateOpenGolfCourse(summary) {
   if (courseCache.has(summary.id)) return courseCache.get(summary.id);
   try {
@@ -215,7 +223,7 @@ async function searchCourses(query, stateFilter = "") {
       const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(browseState)}`);
       const list = Array.isArray(data) ? data : data.courses || data.results || [];
       const candidates = list.map(normalizeCourseSummary);
-      const courses = (await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean);
+      const courses = sortCoursesByName((await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean));
       payload = {
         courses,
         meta: {
@@ -228,7 +236,7 @@ async function searchCourses(query, stateFilter = "") {
       };
     } catch (error) {
       payload = {
-        courses: sampleCourses.filter(course => course.state === browseState),
+        courses: sortCoursesByName(sampleCourses.filter(course => course.state === browseState)),
         meta: {
           source: "sample",
           message: `OpenGolfAPI is unavailable right now, so matching ${browseState} sample courses are shown.`,
@@ -246,7 +254,7 @@ async function searchCourses(query, stateFilter = "") {
     const list = Array.isArray(data) ? data : data.courses || data.results || [];
     const filteredList = stateFilter ? list.filter(course => course.state === stateFilter) : list;
     const candidates = filteredList.slice(0, OPEN_GOLF_SEARCH_LIMIT);
-    const hydrated = (await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean);
+    const hydrated = sortCoursesByName((await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean));
 
     if (hydrated.length) {
       payload = {
@@ -276,7 +284,7 @@ async function searchCourses(query, stateFilter = "") {
     };
   } catch (error) {
     payload = {
-      courses: samples,
+      courses: sortCoursesByName(samples),
       meta: {
         source: samples.length ? "sample" : "error",
         message: samples.length
