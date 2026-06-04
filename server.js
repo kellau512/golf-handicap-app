@@ -10,6 +10,8 @@ const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = path.join(ROOT, "data");
 const USER_FILE = path.join(DATA_DIR, "users.json");
+const OPEN_GOLF_BASE_URL = "https://api.opengolfapi.org/v1";
+const OPEN_GOLF_SEARCH_LIMIT = 10;
 
 const sessions = new Map();
 
@@ -174,54 +176,135 @@ async function requireUser(req, res) {
   return { data, user };
 }
 
-function normalizeCourse(raw) {
+function normalizeCourse(raw, teePayload = null) {
   const course = raw.course || raw;
   const id = String(course.id || course.course_id || course.slug || course.name || crypto.randomUUID());
-  const name = course.name || course.course_name || "Unnamed Course";
+  const name = course.name || course.course_name || course.club_name || "Unnamed Course";
   const city = course.city || course.location?.city || "";
   const state = course.state || course.location?.state || course.region || "";
-  const teeSets = course.tees || course.tee_sets || course.teeBoxes || course.tee_boxes || [];
+  const teeSets = teePayload?.tees || course.tees || course.tee_sets || course.teeBoxes || course.tee_boxes || [];
   const holesByTee = course.holes || course.scorecard || [];
 
   const tees = teeSets.map((tee, index) => {
     const teeHoles = tee.holes || tee.scorecard || holesByTee || [];
     return {
       id: String(tee.id || tee.tee_id || tee.name || index),
-      name: tee.name || tee.tee_name || tee.color || `Tee ${index + 1}`,
+      name: tee.name || tee.tee_name || tee.tee_color || tee.color || `Tee ${index + 1}`,
       gender: tee.gender || tee.gender_code || "",
       rating: Number(tee.rating ?? tee.course_rating ?? tee.cr ?? 0),
-      slope: Number(tee.slope ?? tee.slope_rating ?? 113),
+      slope: Number(tee.slope ?? tee.slope_rating ?? 0),
+      yardage: Number(tee.yardage ?? tee.total_yardage ?? 0),
       holes: normalizeHoles(teeHoles)
     };
   }).filter(tee => tee.rating && tee.slope && tee.holes.length === 18);
 
-  return { id, name, city, state, tees };
+  return {
+    id,
+    name,
+    city,
+    state,
+    holesCount: Number(course.holes_count || course.holesCount || tees[0]?.holes.length || 0),
+    parTotal: Number(course.par_total || course.parTotal || 0),
+    source: id.startsWith("sample-") ? "sample" : "live",
+    tees
+  };
 }
 
 function normalizeHoles(holes) {
   if (!Array.isArray(holes)) return [];
   return holes.map((hole, index) => ({
-    number: Number(hole.number || hole.hole || index + 1),
+    number: Number(hole.number || hole.hole || hole.hole_number || index + 1),
     par: Number(hole.par || 4),
-    handicap: Number(hole.handicap || hole.stroke_index || hole.allocation || hole.hcp || index + 1)
+    handicap: Number(hole.handicap || hole.handicap_index || hole.stroke_index || hole.allocation || hole.hcp || index + 1)
   })).filter(hole => hole.number && hole.par && hole.handicap);
 }
 
-async function fetchOpenGolf(pathname) {
-  const response = await fetch(`https://api.opengolfapi.org/v1${pathname}`);
-  if (!response.ok) throw new Error(`OpenGolfAPI returned ${response.status}`);
-  return response.json();
+async function fetchOpenGolf(pathname, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${OPEN_GOLF_BASE_URL}${pathname}`, { signal: controller.signal });
+    if (!response.ok) throw new Error(`OpenGolfAPI returned ${response.status}`);
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sampleCourseMatches(query) {
+  const normalized = query.toLowerCase();
+  return sampleCourses.filter(course => {
+    return [course.name, course.city, course.state].some(value => String(value || "").toLowerCase().includes(normalized));
+  });
+}
+
+async function hydrateOpenGolfCourse(summary) {
+  try {
+    const id = encodeURIComponent(summary.id);
+    const [detail, tees] = await Promise.all([
+      fetchOpenGolf(`/courses/${id}`),
+      fetchOpenGolf(`/courses/${id}/tees`)
+    ]);
+    const course = normalizeCourse({ ...summary, ...detail }, tees);
+    return course.tees.length ? course : null;
+  } catch {
+    return null;
+  }
 }
 
 async function searchCourses(query) {
-  if (!query || query.length < 2) return sampleCourses;
+  if (!query || query.length < 2) {
+    return {
+      courses: sampleCourses,
+      meta: {
+        source: "sample",
+        message: "Showing sample courses. Enter at least 2 characters to search live U.S. course data."
+      }
+    };
+  }
+
+  const samples = sampleCourseMatches(query);
   try {
-    const data = await fetchOpenGolf(`/courses/search?name=${encodeURIComponent(query)}`);
+    const data = await fetchOpenGolf(`/courses/search?q=${encodeURIComponent(query)}`);
     const list = Array.isArray(data) ? data : data.courses || data.results || [];
-    const normalized = list.map(normalizeCourse).filter(course => course.tees.length);
-    return normalized.length ? normalized : sampleCourses.filter(course => course.name.toLowerCase().includes(query.toLowerCase()));
-  } catch {
-    return sampleCourses.filter(course => course.name.toLowerCase().includes(query.toLowerCase()));
+    const candidates = list.slice(0, OPEN_GOLF_SEARCH_LIMIT);
+    const hydrated = (await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean);
+
+    if (hydrated.length) {
+      return {
+        courses: hydrated,
+        meta: {
+          source: "live",
+          liveCount: hydrated.length,
+          searchedCount: list.length,
+          skippedCount: Math.max(list.length - hydrated.length, 0),
+          message: `Showing ${hydrated.length} live course${hydrated.length === 1 ? "" : "s"} with complete tee and scorecard data.`
+        }
+      };
+    }
+
+    return {
+      courses: samples,
+      meta: {
+        source: samples.length ? "sample" : "empty",
+        searchedCount: list.length,
+        skippedCount: list.length,
+        message: list.length
+          ? "Live matches were found, but none had both tee ratings and an 18-hole scorecard yet."
+          : "No live U.S. course matches were found."
+      }
+    };
+  } catch (error) {
+    return {
+      courses: samples,
+      meta: {
+        source: samples.length ? "sample" : "error",
+        message: samples.length
+          ? "OpenGolfAPI is unavailable right now, so matching sample data is shown."
+          : "OpenGolfAPI is unavailable right now and no matching sample data exists.",
+        error: error.message
+      }
+    };
   }
 }
 
@@ -229,7 +312,12 @@ async function getCourse(id) {
   const sample = sampleCourses.find(course => course.id === id);
   if (sample) return sample;
   try {
-    return normalizeCourse(await fetchOpenGolf(`/courses/${encodeURIComponent(id)}`));
+    const encodedId = encodeURIComponent(id);
+    const [detail, tees] = await Promise.all([
+      fetchOpenGolf(`/courses/${encodedId}`),
+      fetchOpenGolf(`/courses/${encodedId}/tees`)
+    ]);
+    return normalizeCourse(detail, tees);
   } catch {
     return null;
   }
@@ -316,7 +404,7 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/courses" && req.method === "GET") {
     const query = url.searchParams.get("q") || "";
-    json(res, 200, { courses: await searchCourses(query) });
+    json(res, 200, await searchCourses(query));
     return;
   }
 

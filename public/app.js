@@ -21,6 +21,7 @@ const els = {
   courseSearch: document.querySelector("#courseSearch"),
   searchBtn: document.querySelector("#searchBtn"),
   courseSelect: document.querySelector("#courseSelect"),
+  courseDataMessage: document.querySelector("#courseDataMessage"),
   teeSelect: document.querySelector("#teeSelect"),
   saveProfileBtn: document.querySelector("#saveProfileBtn"),
   ghinStatus: document.querySelector("#ghinStatus"),
@@ -154,17 +155,37 @@ async function saveProfile() {
 
 async function searchCourses() {
   els.courseSelect.innerHTML = "<option>Searching...</option>";
-  const payload = await api(`/api/courses?q=${encodeURIComponent(els.courseSearch.value.trim())}`);
-  state.courses = payload.courses;
-  renderCourses();
+  els.courseSelect.disabled = true;
+  els.teeSelect.disabled = true;
+  els.courseDataMessage.textContent = "Searching live U.S. course data...";
+  try {
+    const payload = await api(`/api/courses?q=${encodeURIComponent(els.courseSearch.value.trim())}`);
+    state.courses = payload.courses || [];
+    els.courseDataMessage.textContent = payload.meta?.message || "";
+    renderCourses();
+  } catch (error) {
+    state.courses = [];
+    els.courseDataMessage.textContent = error.message;
+    renderCourses();
+  }
 }
 
 function renderCourses() {
   els.courseSelect.innerHTML = "";
+  els.courseSelect.disabled = state.courses.length === 0;
+  els.teeSelect.disabled = state.courses.length === 0;
+  if (!state.courses.length) {
+    const option = document.createElement("option");
+    option.textContent = "No playable courses found";
+    els.courseSelect.append(option);
+    clearScorecard();
+    return;
+  }
   for (const course of state.courses) {
     const option = document.createElement("option");
     option.value = course.id;
-    option.textContent = [course.name, course.city, course.state].filter(Boolean).join(" • ");
+    const source = course.source === "live" ? "Live" : "Sample";
+    option.textContent = `${[course.name, course.city, course.state].filter(Boolean).join(" • ")} (${source})`;
     els.courseSelect.append(option);
   }
   selectCourse();
@@ -177,11 +198,15 @@ function selectCourse() {
 
 function renderTees() {
   els.teeSelect.innerHTML = "";
-  if (!state.selectedCourse) return;
+  if (!state.selectedCourse || !state.selectedCourse.tees.length) {
+    clearScorecard();
+    return;
+  }
   for (const tee of state.selectedCourse.tees) {
     const option = document.createElement("option");
     option.value = tee.id;
-    option.textContent = `${tee.name} ${tee.gender ? `(${tee.gender})` : ""} • ${tee.rating}/${tee.slope}`;
+    const yardage = tee.yardage ? ` • ${tee.yardage} yds` : "";
+    option.textContent = `${tee.name} ${tee.gender ? `(${tee.gender})` : ""} • ${tee.rating}/${tee.slope}${yardage}`;
     els.teeSelect.append(option);
   }
   selectTee();
@@ -229,6 +254,21 @@ function calculate() {
     `;
     els.scorecardBody.append(row);
   }
+}
+
+function clearScorecard() {
+  state.selectedCourse = null;
+  state.selectedTee = null;
+  els.teeSelect.innerHTML = "<option>No tees available</option>";
+  els.courseHandicap.textContent = "--";
+  els.targetScore.textContent = "--";
+  els.ratingSlope.textContent = "--";
+  els.totalPar.textContent = "--";
+  els.scorecardBody.innerHTML = `
+    <tr>
+      <td colspan="5">Search for a course with complete tee ratings and an 18-hole scorecard.</td>
+    </tr>
+  `;
 }
 
 async function loadGhinStatus() {
