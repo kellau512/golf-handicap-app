@@ -8,13 +8,16 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "127.0.0.1";
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
+const DATA_DIR = path.join(ROOT, "data");
 const OPEN_GOLF_BASE_URL = "https://api.opengolfapi.org/v1";
 const OPEN_GOLF_SEARCH_LIMIT = 10;
 const DEFAULT_BROWSE_STATE = "CA";
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 
 const courseCache = new Map();
 const searchCache = new Map();
+const snapshotRefreshes = new Map();
 
 const sampleCourses = [
   {
@@ -162,16 +165,22 @@ function normalizeCourseSummary(raw) {
   };
 }
 
-async function fetchOpenGolf(pathname, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(`${OPEN_GOLF_BASE_URL}${pathname}`, { signal: controller.signal });
-    if (!response.ok) throw new Error(`OpenGolfAPI returned ${response.status}`);
-    return response.json();
-  } finally {
-    clearTimeout(timeout);
+async function fetchOpenGolf(pathname, timeoutMs = 8000, retries = 1) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${OPEN_GOLF_BASE_URL}${pathname}`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`OpenGolfAPI returned ${response.status}`);
+      return response.json();
+    } catch (error) {
+      lastError = error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+  throw lastError;
 }
 
 function sampleCourseMatches(query, stateFilter = "") {
@@ -191,20 +200,90 @@ function sortCoursesByName(courses) {
   });
 }
 
+function snapshotPath(state) {
+  return path.join(DATA_DIR, `course-snapshot-${state}.json`);
+}
+
+function isFreshSnapshot(snapshot) {
+  if (!snapshot?.refreshedAt) return false;
+  return Date.now() - new Date(snapshot.refreshedAt).getTime() < SNAPSHOT_TTL_MS;
+}
+
+async function readCourseSnapshot(state) {
+  try {
+    const raw = await fs.readFile(snapshotPath(state), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function writeCourseSnapshot(snapshot) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(snapshotPath(snapshot.state), JSON.stringify(snapshot, null, 2));
+}
+
+async function hydrateCourseSummaries(candidates, batchSize = 10) {
+  const courses = [];
+  for (let index = 0; index < candidates.length; index += batchSize) {
+    const batch = candidates.slice(index, index + batchSize);
+    const hydrated = await Promise.all(batch.map(hydrateOpenGolfCourse));
+    courses.push(...hydrated.filter(Boolean));
+  }
+  return sortCoursesByName(courses);
+}
+
+async function refreshCourseSnapshot(state) {
+  if (snapshotRefreshes.has(state)) return snapshotRefreshes.get(state);
+
+  const refresh = (async () => {
+    const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(state)}`);
+    const list = Array.isArray(data) ? data : data.courses || data.results || [];
+    const candidates = list.map(normalizeCourseSummary);
+    const courses = await hydrateCourseSummaries(candidates);
+    const snapshot = {
+      state,
+      refreshedAt: new Date().toISOString(),
+      searchedCount: data.count || list.length,
+      courses
+    };
+    await writeCourseSnapshot(snapshot);
+    return snapshot;
+  })().finally(() => snapshotRefreshes.delete(state));
+
+  snapshotRefreshes.set(state, refresh);
+  return refresh;
+}
+
+function refreshCourseSnapshotInBackground(state) {
+  refreshCourseSnapshot(state).catch(error => {
+    console.warn(`Course snapshot refresh failed for ${state}: ${error.message}`);
+  });
+}
+
+async function getBrowseSnapshot(state) {
+  const snapshot = await readCourseSnapshot(state);
+  if (isFreshSnapshot(snapshot)) return { snapshot, status: "fresh" };
+  if (snapshot?.courses?.length) {
+    refreshCourseSnapshotInBackground(state);
+    return { snapshot, status: "stale" };
+  }
+  return { snapshot: await refreshCourseSnapshot(state), status: "refreshed" };
+}
+
 async function hydrateOpenGolfCourse(summary) {
   if (courseCache.has(summary.id)) return courseCache.get(summary.id);
   try {
     const id = encodeURIComponent(summary.id);
     const [detail, tees] = await Promise.all([
-      fetchOpenGolf(`/courses/${id}`),
-      fetchOpenGolf(`/courses/${id}/tees`)
+      fetchOpenGolf(`/courses/${id}`, 12000),
+      fetchOpenGolf(`/courses/${id}/tees`, 12000)
     ]);
     const course = normalizeCourse({ ...summary, ...detail }, tees);
     const playableCourse = course.tees.length ? course : null;
     courseCache.set(summary.id, playableCourse);
     return playableCourse;
   } catch {
-    courseCache.set(summary.id, null);
     return null;
   }
 }
@@ -220,15 +299,15 @@ async function searchCourses(query, stateFilter = "") {
   let payload;
   if (!query || query.length < 2) {
     try {
-      const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(browseState)}`);
-      const list = Array.isArray(data) ? data : data.courses || data.results || [];
-      const candidates = list.map(normalizeCourseSummary);
-      const courses = sortCoursesByName((await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean));
+      const { snapshot, status } = await getBrowseSnapshot(browseState);
+      const courses = sortCoursesByName(snapshot.courses || []);
       payload = {
         courses,
         meta: {
           source: "browse",
-          searchedCount: data.count || list.length,
+          snapshotStatus: status,
+          refreshedAt: snapshot.refreshedAt,
+          searchedCount: snapshot.searchedCount || courses.length,
           message: courses.length
             ? `Browsing ${courses.length} course${courses.length === 1 ? "" : "s"} with tee and scorecard data in ${browseState}.`
             : `No courses with tee and scorecard data were found in ${browseState}.`
@@ -243,7 +322,29 @@ async function searchCourses(query, stateFilter = "") {
           error: error.message
         }
       };
+      return payload;
     }
+    searchCache.set(cacheKey, { cachedAt: Date.now(), payload });
+    return payload;
+  }
+
+  const normalizedQuery = query.toLowerCase();
+  const browseSnapshot = await readCourseSnapshot(browseState);
+  const snapshotMatches = browseSnapshot?.courses?.filter(course => {
+    return [course.name, course.city, course.state].some(value => String(value || "").toLowerCase().includes(normalizedQuery));
+  }) || [];
+  if (snapshotMatches.length) {
+    payload = {
+      courses: sortCoursesByName(snapshotMatches),
+      meta: {
+        source: "browse",
+        snapshotStatus: isFreshSnapshot(browseSnapshot) ? "fresh" : "stale",
+        refreshedAt: browseSnapshot.refreshedAt,
+        searchedCount: browseSnapshot.searchedCount || browseSnapshot.courses.length,
+        message: `Showing ${snapshotMatches.length} saved course${snapshotMatches.length === 1 ? "" : "s"} with tee and scorecard data in ${browseState}.`
+      }
+    };
+    if (!isFreshSnapshot(browseSnapshot)) refreshCourseSnapshotInBackground(browseState);
     searchCache.set(cacheKey, { cachedAt: Date.now(), payload });
     return payload;
   }
@@ -254,7 +355,7 @@ async function searchCourses(query, stateFilter = "") {
     const list = Array.isArray(data) ? data : data.courses || data.results || [];
     const filteredList = stateFilter ? list.filter(course => course.state === stateFilter) : list;
     const candidates = filteredList.slice(0, OPEN_GOLF_SEARCH_LIMIT);
-    const hydrated = sortCoursesByName((await Promise.all(candidates.map(hydrateOpenGolfCourse))).filter(Boolean));
+    const hydrated = await hydrateCourseSummaries(candidates);
 
     if (hydrated.length) {
       payload = {
@@ -293,6 +394,7 @@ async function searchCourses(query, stateFilter = "") {
         error: error.message
       }
     };
+    return payload;
   }
   searchCache.set(cacheKey, { cachedAt: Date.now(), payload });
   return payload;
@@ -302,6 +404,12 @@ async function getCourse(id) {
   const sample = sampleCourses.find(course => course.id === id);
   if (sample) return sample;
   if (courseCache.has(id)) return courseCache.get(id);
+  const snapshot = await readCourseSnapshot(DEFAULT_BROWSE_STATE);
+  const snapshottedCourse = snapshot?.courses?.find(course => course.id === id);
+  if (snapshottedCourse) {
+    courseCache.set(id, snapshottedCourse);
+    return snapshottedCourse;
+  }
   try {
     const encodedId = encodeURIComponent(id);
     const [detail, tees] = await Promise.all([

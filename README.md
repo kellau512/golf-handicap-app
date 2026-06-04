@@ -5,9 +5,8 @@ A local web app for U.S. golfers to calculate a course-specific target score fro
 ## Features
 
 - Manual Handicap Index entry
-- Simple local user accounts
-- Saved Handicap Index per account
-- Live course lookup through OpenGolfAPI when available
+- Daily local course snapshot for fast California browsing
+- Live course search through OpenGolfAPI when the local snapshot has no match
 - Fallback U.S. sample courses for offline/local testing
 - Course Handicap calculation
 - Target gross score calculation
@@ -23,6 +22,10 @@ node server.js
 Then open [http://localhost:3000](http://localhost:3000).
 
 No package install is required for the current prototype because it uses Node's built-in HTTP server and browser-native JavaScript. If npm is available on your machine, `npm start` runs the same command.
+
+## Course Data
+
+The app stores generated course snapshots in `data/course-snapshot-*.json`. A fresh snapshot is reused for 24 hours. If an older snapshot exists, the app serves it immediately and refreshes the data in the background; if no snapshot exists yet, the first browse request builds one from OpenGolfAPI.
 
 ## GHIN Integration Note
 

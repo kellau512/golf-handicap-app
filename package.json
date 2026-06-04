@@ -2,7 +2,7 @@
   "name": "golf-handicap-app",
   "version": "0.1.0",
   "private": true,
-  "description": "Local golf handicap calculator with course lookup and simple user accounts.",
+  "description": "Local golf handicap calculator with snapshotted course lookup.",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
