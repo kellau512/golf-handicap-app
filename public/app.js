@@ -29,6 +29,9 @@ const els = {
   targetScore: document.querySelector("#targetScore"),
   ratingSlope: document.querySelector("#ratingSlope"),
   totalPar: document.querySelector("#totalPar"),
+  courseFormula: document.querySelector("#courseFormula"),
+  targetFormula: document.querySelector("#targetFormula"),
+  strokeSummary: document.querySelector("#strokeSummary"),
   scorecardBody: document.querySelector("#scorecardBody")
 };
 
@@ -226,19 +229,46 @@ function strokesForHole(courseHandicap, allocation) {
   return sign * (base + extra);
 }
 
+function formatNumber(value, digits = 1) {
+  return Number(value).toFixed(digits).replace(/\.0$/, "");
+}
+
+function formatSigned(value) {
+  return value >= 0 ? `+ ${formatNumber(value)}` : `- ${formatNumber(Math.abs(value))}`;
+}
+
+function summarizeStrokes(courseHandicap) {
+  if (courseHandicap === 0) return "No extra strokes allocated.";
+  const abs = Math.abs(courseHandicap);
+  const base = Math.floor(abs / 18);
+  const extra = abs % 18;
+  const direction = courseHandicap > 0 ? "Receive" : "Give back";
+  if (!base) return `${direction} 1 stroke on holes ranked 1-${extra}.`;
+  const baseText = `${direction} ${base} stroke${base === 1 ? "" : "s"} on every hole`;
+  const extraText = extra ? `, plus 1 more on holes ranked 1-${extra}` : "";
+  return `${baseText}${extraText}.`;
+}
+
 function calculate() {
   const tee = state.selectedTee;
   const handicapIndex = Number(els.handicapInput.value);
   if (!tee || Number.isNaN(handicapIndex)) return;
 
   const totalPar = tee.holes.reduce((sum, hole) => sum + hole.par, 0);
-  const courseHandicap = Math.round(handicapIndex * (tee.slope / 113) + (tee.rating - totalPar));
-  const targetScore = Math.round(tee.rating + courseHandicap);
+  const slopeAdjustment = handicapIndex * (tee.slope / 113);
+  const ratingAdjustment = tee.rating - totalPar;
+  const rawCourseHandicap = slopeAdjustment + ratingAdjustment;
+  const courseHandicap = Math.round(rawCourseHandicap);
+  const rawTargetScore = tee.rating + courseHandicap;
+  const targetScore = Math.round(rawTargetScore);
 
   els.courseHandicap.textContent = String(courseHandicap);
   els.targetScore.textContent = String(targetScore);
   els.ratingSlope.textContent = `${tee.rating} / ${tee.slope}`;
   els.totalPar.textContent = String(totalPar);
+  els.courseFormula.textContent = `${formatNumber(handicapIndex)} × ${tee.slope} / 113 ${formatSigned(ratingAdjustment)} = ${formatNumber(rawCourseHandicap)} → ${courseHandicap}`;
+  els.targetFormula.textContent = `${formatNumber(tee.rating)} + ${courseHandicap} = ${formatNumber(rawTargetScore)} → ${targetScore}`;
+  els.strokeSummary.textContent = summarizeStrokes(courseHandicap);
 
   els.scorecardBody.innerHTML = "";
   for (const hole of tee.holes) {
@@ -264,6 +294,9 @@ function clearScorecard() {
   els.targetScore.textContent = "--";
   els.ratingSlope.textContent = "--";
   els.totalPar.textContent = "--";
+  els.courseFormula.textContent = "--";
+  els.targetFormula.textContent = "--";
+  els.strokeSummary.textContent = "--";
   els.scorecardBody.innerHTML = `
     <tr>
       <td colspan="5">Search for a course with complete tee ratings and an 18-hole scorecard.</td>
