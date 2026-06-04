@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Golf Handicap App</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="top-band">
+        <div>
+          <p class="eyebrow">US handicap calculator</p>
+          <h1>Golf Handicap App</h1>
+        </div>
+        <div class="account-panel">
+          <div id="signedOut" class="auth-grid">
+            <input id="nameInput" type="text" placeholder="Name" autocomplete="name">
+            <input id="emailInput" type="email" placeholder="Email" autocomplete="email">
+            <input id="passwordInput" type="password" placeholder="Password" autocomplete="current-password">
+            <button id="registerBtn" type="button">Register</button>
+            <button id="loginBtn" type="button" class="secondary">Log in</button>
+          </div>
+          <div id="signedIn" class="profile hidden">
+            <span id="profileName"></span>
+            <button id="logoutBtn" type="button" class="secondary">Log out</button>
+          </div>
+          <p id="authMessage" class="message"></p>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="controls">
+          <label>
+            Handicap Index
+            <input id="handicapInput" type="number" step="0.1" min="-10" max="54" value="12.4">
+          </label>
+
+          <label>
+            Course Search
+            <div class="search-row">
+              <input id="courseSearch" type="search" placeholder="Pebble, Bethpage, Pinehurst...">
+              <button id="searchBtn" type="button">Search</button>
+            </div>
+          </label>
+
+          <label>
+            Course
+            <select id="courseSelect"></select>
+          </label>
+
+          <label>
+            Tee
+            <select id="teeSelect"></select>
+          </label>
+
+          <button id="saveProfileBtn" type="button" class="save-button">Save Handicap</button>
+
+          <div class="ghin-box">
+            <strong>GHIN sync</strong>
+            <p id="ghinStatus">Checking integration status...</p>
+          </div>
+        </aside>
+
+        <section class="score-area">
+          <div class="summary-strip">
+            <div>
+              <span>Course Handicap</span>
+              <strong id="courseHandicap">--</strong>
+            </div>
+            <div>
+              <span>Target Score</span>
+              <strong id="targetScore">--</strong>
+            </div>
+            <div>
+              <span>Rating / Slope</span>
+              <strong id="ratingSlope">--</strong>
+            </div>
+            <div>
+              <span>Total Par</span>
+              <strong id="totalPar">--</strong>
+            </div>
+          </div>
+
+          <div class="scorecard-wrap">
+            <table class="scorecard">
+              <thead>
+                <tr>
+                  <th>Hole</th>
+                  <th>Par</th>
+                  <th>HCP</th>
+                  <th>Strokes</th>
+                  <th>Target</th>
+                </tr>
+              </thead>
+              <tbody id="scorecardBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
