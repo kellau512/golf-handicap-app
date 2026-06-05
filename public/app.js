@@ -12,6 +12,12 @@ const state = {
 };
 
 const RECENT_SETUP_KEY = "golfRecentSetup";
+const {
+  calculateTeeResult,
+  scorecardForTee,
+  strokesForHole,
+  summarizeStrokes
+} = window.GolfCalculator;
 
 const els = {
   handicapInput: document.querySelector("#handicapInput"),
@@ -23,6 +29,7 @@ const els = {
   courseIndexStatus: document.querySelector("#courseIndexStatus"),
   teeSelect: document.querySelector("#teeSelect"),
   courseDetails: document.querySelector("#courseDetails"),
+  courseIndexStatusDetails: document.querySelector("#courseIndexStatusDetails"),
   ghinStatus: document.querySelector("#ghinStatus"),
   courseHandicap: document.querySelector("#courseHandicap"),
   targetScore: document.querySelector("#targetScore"),
@@ -257,7 +264,7 @@ async function selectCourse({ preferredTeeId = "" } = {}) {
 function renderTees(preferredTeeId = "") {
   els.teeSelect.innerHTML = "";
   if (!state.selectedCourse || !state.selectedCourse.tees.length) {
-    clearScorecard();
+    renderCourseUnavailable(state.selectedCourse?.availabilityMessage || "Tee ratings and scorecard data are not available for this course yet.");
     return;
   }
   for (const tee of state.selectedCourse.tees) {
@@ -357,32 +364,12 @@ function selectTee() {
   saveRecentSetup();
 }
 
-function strokesForHole(courseHandicap, allocation) {
-  const sign = courseHandicap < 0 ? -1 : 1;
-  const abs = Math.abs(courseHandicap);
-  const base = Math.floor(abs / 18);
-  const extra = abs % 18 >= allocation ? 1 : 0;
-  return sign * (base + extra);
-}
-
 function formatNumber(value, digits = 1) {
   return Number(value).toFixed(digits).replace(/\.0$/, "");
 }
 
 function formatSigned(value) {
   return value >= 0 ? `+ ${formatNumber(value)}` : `- ${formatNumber(Math.abs(value))}`;
-}
-
-function summarizeStrokes(courseHandicap) {
-  if (courseHandicap === 0) return "No extra strokes allocated.";
-  const abs = Math.abs(courseHandicap);
-  const base = Math.floor(abs / 18);
-  const extra = abs % 18;
-  const direction = courseHandicap > 0 ? "Receive" : "Give back";
-  if (!base) return `${direction} 1 stroke on holes ranked 1-${extra}.`;
-  const baseText = `${direction} ${base} stroke${base === 1 ? "" : "s"} on every hole`;
-  const extraText = extra ? `, plus 1 more on holes ranked 1-${extra}` : "";
-  return `${baseText}${extraText}.`;
 }
 
 function escapeHtml(value) {
@@ -393,26 +380,6 @@ function escapeHtml(value) {
     "\"": "&quot;",
     "'": "&#39;"
   }[char]));
-}
-
-function calculateTeeResult(tee, handicapIndex) {
-  const totalPar = tee.holes.reduce((sum, hole) => sum + hole.par, 0);
-  const slopeAdjustment = handicapIndex * (tee.slope / 113);
-  const ratingAdjustment = tee.rating - totalPar;
-  const rawCourseHandicap = slopeAdjustment + ratingAdjustment;
-  const courseHandicap = Math.round(rawCourseHandicap);
-  const rawTargetScore = tee.rating + courseHandicap;
-  const targetScore = Math.round(rawTargetScore);
-
-  return {
-    totalPar,
-    slopeAdjustment,
-    ratingAdjustment,
-    rawCourseHandicap,
-    courseHandicap,
-    rawTargetScore,
-    targetScore
-  };
 }
 
 function renderTeeComparison() {
@@ -438,8 +405,9 @@ function renderTeeComparison() {
 }
 
 function appendScorecardSummary(label, holes, courseHandicap) {
-  const parTotal = holes.reduce((sum, hole) => sum + hole.par, 0);
-  const strokeTotal = holes.reduce((sum, hole) => sum + strokesForHole(courseHandicap, hole.handicap), 0);
+  const scored = holes.map(hole => ({ ...hole, strokes: strokesForHole(courseHandicap, hole.handicap) }));
+  const parTotal = scored.reduce((sum, hole) => sum + hole.par, 0);
+  const strokeTotal = scored.reduce((sum, hole) => sum + hole.strokes, 0);
   const targetTotal = parTotal + strokeTotal;
   const row = document.createElement("tr");
   row.className = "summary-row";
@@ -470,16 +438,16 @@ function calculate() {
   renderTeeComparison();
 
   els.scorecardBody.innerHTML = "";
-  for (const hole of tee.holes) {
-    const strokes = strokesForHole(result.courseHandicap, hole.handicap);
-    const target = hole.par + strokes;
+  const scorecard = scorecardForTee(tee, result.courseHandicap);
+  for (const hole of scorecard.holes) {
     const row = document.createElement("tr");
+    const strokeClass = hole.strokes < 0 ? " giveback" : hole.strokes === 0 ? " even" : "";
     row.innerHTML = `
       <td>${hole.number}</td>
       <td>${hole.par}</td>
       <td>${hole.handicap}</td>
-      <td><span class="stroke-pill">${strokes > 0 ? `+${strokes}` : strokes}</span></td>
-      <td>${target}</td>
+      <td><span class="stroke-pill${strokeClass}" aria-label="${Math.abs(hole.strokes)} stroke${Math.abs(hole.strokes) === 1 ? "" : "s"} ${hole.strokes < 0 ? "given back" : "received"}">${hole.strokes > 0 ? `+${hole.strokes}` : hole.strokes}</span></td>
+      <td>${hole.target}</td>
     `;
     els.scorecardBody.append(row);
     if (hole.number === 9) {
@@ -545,11 +513,20 @@ async function loadCourseIndexStatus() {
     if (payload.available) {
       const freshness = payload.fresh ? "fresh" : "stale";
       els.courseIndexStatus.textContent = `Daily index ${freshness} • ${payload.totalCourses} courses • refreshed ${formatDateTime(payload.refreshedAt)}`;
+      els.courseIndexStatusDetails.innerHTML = `
+        <span>${payload.refreshedStates} states refreshed</span>
+        <span>${payload.cachedLiveSearches} cached live searches</span>
+        <span>${payload.recentCourseIds} recent courses tracked</span>
+        <span>Detail warm limit ${payload.detailWarmLimit}</span>
+        ${payload.openGolfBackoffUntil ? `<span>OpenGolfAPI backs off until ${escapeHtml(formatDateTime(payload.openGolfBackoffUntil))}</span>` : "<span>OpenGolfAPI available</span>"}
+      `;
     } else {
       els.courseIndexStatus.textContent = "Daily course index is not available yet.";
+      els.courseIndexStatusDetails.innerHTML = "";
     }
   } catch (error) {
     els.courseIndexStatus.textContent = `Daily course index status unavailable: ${error.message}`;
+    els.courseIndexStatusDetails.innerHTML = "";
   }
 }
 

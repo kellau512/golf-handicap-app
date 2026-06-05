@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "test": "node --test",
     "refresh:courses": "node server.js --refresh-course-index",
     "warm:details": "node server.js --warm-course-details"
   },

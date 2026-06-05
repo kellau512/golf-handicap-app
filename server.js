@@ -743,27 +743,50 @@ function scheduleCourseIndexRefresh() {
   setInterval(warmRecentCourseDetailsInBackground, COURSE_INDEX_REFRESH_MS);
 }
 
-if (process.argv.includes("--refresh-course-index")) {
-  refreshCourseIndex({ force: true })
-    .then(index => {
-      console.log(`Course index refreshed: ${index.totalCourses || 0} courses across ${index.refreshedStates || 0} states.`);
-    })
-    .catch(error => {
-      console.error(`Course index refresh failed: ${error.message}`);
-      process.exitCode = 1;
-    });
-} else if (process.argv.includes("--warm-course-details")) {
-  warmRecentCourseDetails({ force: process.argv.includes("--force") })
-    .then(result => {
-      console.log(`Course details warmed: ${result.warmed || 0}; skipped: ${result.skipped || 0}.`);
-    })
-    .catch(error => {
-      console.error(`Course detail warming failed: ${error.message}`);
-      process.exitCode = 1;
-    });
-} else {
+function startServer() {
   server.listen(PORT, HOST, () => {
     console.log(`Golf Handicap App running at http://${HOST}:${PORT}`);
     scheduleCourseIndexRefresh();
   });
 }
+
+async function runCli(args = process.argv) {
+  if (args.includes("--refresh-course-index")) {
+    try {
+      const index = await refreshCourseIndex({ force: true });
+      console.log(`Course index refreshed: ${index.totalCourses || 0} courses across ${index.refreshedStates || 0} states.`);
+    } catch (error) {
+      console.error(`Course index refresh failed: ${error.message}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (args.includes("--warm-course-details")) {
+    try {
+      const result = await warmRecentCourseDetails({ force: args.includes("--force") });
+      console.log(`Course details warmed: ${result.warmed || 0}; skipped: ${result.skipped || 0}.`);
+    } catch (error) {
+      console.error(`Course detail warming failed: ${error.message}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  startServer();
+}
+
+if (require.main === module) {
+  runCli();
+}
+
+module.exports = {
+  coursesFromIndex,
+  isFreshCourseIndex,
+  liveSearchKey,
+  normalizeCourse,
+  normalizeCourseSummary,
+  normalizeHoles,
+  sampleCourseMatches,
+  sortCoursesByName
+};

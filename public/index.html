@@ -91,7 +91,10 @@
             <select id="courseSelect"></select>
           </label>
           <p id="courseDataMessage" class="data-message">Loading course data...</p>
-          <p id="courseIndexStatus" class="index-status">Checking daily course index...</p>
+          <details class="data-status">
+            <summary id="courseIndexStatus">Checking daily course index...</summary>
+            <div id="courseIndexStatusDetails"></div>
+          </details>
 
           <label>
             Tee
@@ -150,9 +153,9 @@
                 <tr>
                   <th>Hole</th>
                   <th>Par</th>
-                  <th>HCP</th>
+                  <th>Rank</th>
                   <th>Strokes</th>
-                  <th>Target</th>
+                  <th>Target Gross</th>
                 </tr>
               </thead>
               <tbody id="scorecardBody"></tbody>
@@ -162,6 +165,7 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260613"></script>
+    <script src="/calculator.js?v=20260614"></script>
+    <script src="/app.js?v=20260614"></script>
   </body>
 </html>

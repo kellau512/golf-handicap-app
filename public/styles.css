@@ -148,11 +148,28 @@ select {
   line-height: 1.35;
 }
 
-.index-status {
+.data-status {
   margin: -14px 0 0;
+  border: 1px solid #c8d8d4;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fbfefc;
+}
+
+.data-status summary {
   color: var(--blue);
   font-size: 0.78rem;
   font-weight: 800;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.data-status div {
+  display: grid;
+  gap: 5px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 0.78rem;
   line-height: 1.35;
 }
 
@@ -398,6 +415,15 @@ select {
   color: var(--white);
   background: var(--green);
   font-weight: 900;
+}
+
+.stroke-pill.even {
+  color: var(--navy);
+  background: #dcecf1;
+}
+
+.stroke-pill.giveback {
+  background: var(--blue);
 }
 
 @media (max-width: 860px) {

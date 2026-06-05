@@ -13,6 +13,7 @@ A local web app for U.S. golfers to calculate a course-specific target score fro
 - Course Handicap calculation
 - Target gross score calculation
 - Hole-by-hole strokes received using each hole's handicap allocation
+- Expandable data freshness panel for daily index and live-cache status
 - GHIN integration status placeholder for future approved API access
 
 ## Run Locally
@@ -24,6 +25,14 @@ node server.js
 Then open [http://localhost:3000](http://localhost:3000).
 
 No package install is required for the current prototype because it uses Node's built-in HTTP server and browser-native JavaScript. If npm is available on your machine, `npm start` runs the same command.
+
+## Test
+
+```bash
+node --test
+```
+
+The tests cover the shared handicap calculator, stroke allocation, scorecard totals, course normalization, alphabetical sorting, and cache key behavior.
 
 ## Course Data
 
