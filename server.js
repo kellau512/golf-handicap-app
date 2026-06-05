@@ -526,7 +526,7 @@ async function handleApi(req, res, url) {
     const id = decodeURIComponent(url.pathname.replace("/api/courses/", ""));
     const course = await getCourse(id);
     if (!course) {
-      json(res, 404, { error: "Course not found." });
+      json(res, 404, { error: "Tee ratings and scorecard data are not available for this course yet." });
       return;
     }
     json(res, 200, { course });

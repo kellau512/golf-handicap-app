@@ -107,8 +107,7 @@ async function selectCourse() {
       state.selectedCourse = hydratedCourse;
       els.teeSelect.disabled = false;
     } catch (error) {
-      els.courseDataMessage.textContent = `Course selected, but tee data could not be loaded: ${error.message}`;
-      renderCourseDetails();
+      renderCourseUnavailable(error.message);
       return;
     }
   }
@@ -142,7 +141,8 @@ function renderCourseDetails() {
   const details = [
     [course.courseType, "Type"],
     [course.address, "Address"],
-    [course.holesCount ? `${course.holesCount} holes` : "", "Holes"]
+    [course.holesCount ? `${course.holesCount} holes` : "", "Holes"],
+    [course.availabilityMessage, "Availability"]
   ].filter(([value]) => value);
 
   els.courseDetails.innerHTML = details.map(([value, label]) => `
@@ -151,6 +151,33 @@ function renderCourseDetails() {
       <strong>${escapeHtml(value)}</strong>
     </div>
   `).join("");
+}
+
+function renderCourseUnavailable(message) {
+  if (state.selectedCourse) {
+    state.selectedCourse = {
+      ...state.selectedCourse,
+      availabilityMessage: message
+    };
+  }
+  state.selectedTee = null;
+  els.courseDataMessage.textContent = message;
+  els.teeSelect.innerHTML = "<option>Tee data unavailable</option>";
+  els.teeSelect.disabled = true;
+  els.courseHandicap.textContent = "--";
+  els.targetScore.textContent = "--";
+  els.ratingSlope.textContent = "--";
+  els.totalPar.textContent = "--";
+  els.courseFormula.textContent = "--";
+  els.targetFormula.textContent = "--";
+  els.strokeSummary.textContent = "--";
+  els.teeComparison.innerHTML = "";
+  renderCourseDetails();
+  els.scorecardBody.innerHTML = `
+    <tr>
+      <td colspan="5">This course is in the daily index, but tee ratings and scorecard data are not available yet.</td>
+    </tr>
+  `;
 }
 
 function selectTee() {
