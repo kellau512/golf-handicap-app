@@ -17,10 +17,13 @@ const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 const COURSE_INDEX_FILE = path.join(DATA_DIR, "course-index.json");
 const COURSE_INDEX_REFRESH_MS = 24 * 60 * 60 * 1000;
+const LIVE_SEARCH_CACHE_FILE = path.join(DATA_DIR, "live-search-cache.json");
+const DETAIL_WARM_LIMIT = Number(process.env.DETAIL_WARM_LIMIT || 20);
 
 const courseCache = new Map();
 const searchCache = new Map();
 let courseIndexRefresh = null;
+let detailWarmRefresh = null;
 let openGolfBackoffUntil = 0;
 
 const STATE_CODES = [
@@ -275,6 +278,54 @@ async function writeCourseIndex(index) {
   await fs.writeFile(COURSE_INDEX_FILE, JSON.stringify(index, null, 2));
 }
 
+function liveSearchKey(query, state) {
+  return `${state || ""}|${query.trim().toLowerCase()}`;
+}
+
+async function readLiveSearchCache() {
+  try {
+    const raw = await fs.readFile(LIVE_SEARCH_CACHE_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return { searches: {}, recentCourseIds: [] };
+  }
+}
+
+async function writeLiveSearchCache(cache) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(LIVE_SEARCH_CACHE_FILE, JSON.stringify(cache, null, 2));
+}
+
+async function getCachedLiveSearch(query, state) {
+  const cache = await readLiveSearchCache();
+  const entry = cache.searches?.[liveSearchKey(query, state)];
+  return entry?.courses ? sortCoursesByName(entry.courses) : [];
+}
+
+async function saveLiveSearch(query, state, courses) {
+  if (!courses.length) return;
+  const cache = await readLiveSearchCache();
+  cache.searches = cache.searches || {};
+  cache.recentCourseIds = cache.recentCourseIds || [];
+  cache.searches[liveSearchKey(query, state)] = {
+    query,
+    state,
+    refreshedAt: new Date().toISOString(),
+    courses: sortCoursesByName(courses)
+  };
+  for (const course of courses) {
+    cache.recentCourseIds = [course.id, ...cache.recentCourseIds.filter(id => id !== course.id)].slice(0, 100);
+  }
+  await writeLiveSearchCache(cache);
+}
+
+async function trackRecentCourse(courseId) {
+  const cache = await readLiveSearchCache();
+  cache.searches = cache.searches || {};
+  cache.recentCourseIds = [courseId, ...(cache.recentCourseIds || []).filter(id => id !== courseId)].slice(0, 100);
+  await writeLiveSearchCache(cache);
+}
+
 function coursesFromIndex(index, state) {
   return sortCoursesByName(index?.states?.[state]?.courses || []);
 }
@@ -379,6 +430,63 @@ async function hydrateOpenGolfCourse(summary) {
   }
 }
 
+async function buildCourseSummaryLookup() {
+  const index = await readCourseIndex();
+  const byId = new Map();
+  for (const stateEntry of Object.values(index?.states || {})) {
+    for (const course of stateEntry.courses || []) {
+      byId.set(course.id, course);
+    }
+  }
+  const liveCache = await readLiveSearchCache();
+  for (const entry of Object.values(liveCache.searches || {})) {
+    for (const course of entry.courses || []) {
+      byId.set(course.id, course);
+    }
+  }
+  return byId;
+}
+
+async function warmRecentCourseDetails({ force = false } = {}) {
+  if (detailWarmRefresh) return detailWarmRefresh;
+
+  detailWarmRefresh = (async () => {
+    const cache = await readLiveSearchCache();
+    const ids = cache.recentCourseIds || [];
+    if (!ids.length) return { warmed: 0, skipped: 0 };
+    const lookup = await buildCourseSummaryLookup();
+    let warmed = 0;
+    let skipped = 0;
+
+    for (const id of ids) {
+      if (warmed >= DETAIL_WARM_LIMIT) break;
+      if (!force && await readCourseDetail(id)) {
+        skipped += 1;
+        continue;
+      }
+      const summary = lookup.get(id);
+      if (!summary) {
+        skipped += 1;
+        continue;
+      }
+      const course = await hydrateOpenGolfCourse(summary);
+      if (course) warmed += 1;
+    }
+
+    return { warmed, skipped };
+  })().finally(() => {
+    detailWarmRefresh = null;
+  });
+
+  return detailWarmRefresh;
+}
+
+function warmRecentCourseDetailsInBackground() {
+  warmRecentCourseDetails().catch(error => {
+    console.warn(`Course detail warming failed: ${error.message}`);
+  });
+}
+
 async function searchCourses(query, stateFilter = "") {
   const browseState = stateFilter || DEFAULT_BROWSE_STATE;
   const cacheKey = `${query.toLowerCase()}|${browseState}`;
@@ -442,6 +550,20 @@ async function searchCourses(query, stateFilter = "") {
     return payload;
   }
 
+  const cachedLiveMatches = await getCachedLiveSearch(query, browseState);
+  if (cachedLiveMatches.length) {
+    payload = {
+      courses: cachedLiveMatches,
+      meta: {
+        source: "cached-live",
+        searchedCount: cachedLiveMatches.length,
+        message: `Showing ${cachedLiveMatches.length} cached live result${cachedLiveMatches.length === 1 ? "" : "s"} for "${query}".`
+      }
+    };
+    searchCache.set(cacheKey, { cachedAt: Date.now(), payload });
+    return payload;
+  }
+
   const samples = sampleCourseMatches(query, stateFilter);
   try {
     const data = await fetchOpenGolf(`/courses/search?q=${encodeURIComponent(query)}`);
@@ -451,6 +573,7 @@ async function searchCourses(query, stateFilter = "") {
     const hydrated = await hydrateCourseSummaries(candidates);
 
     if (hydrated.length) {
+      await saveLiveSearch(query, browseState, hydrated);
       payload = {
         courses: hydrated,
         meta: {
@@ -496,9 +619,15 @@ async function searchCourses(query, stateFilter = "") {
 async function getCourse(id) {
   const sample = sampleCourses.find(course => course.id === id);
   if (sample) return { course: sample, source: "sample" };
-  if (courseCache.has(id)) return { course: courseCache.get(id), source: "memory" };
+  if (courseCache.has(id)) {
+    await trackRecentCourse(id);
+    return { course: courseCache.get(id), source: "memory" };
+  }
   const cachedDetail = await readCourseDetail(id);
-  if (cachedDetail) return { course: cachedDetail, source: "cache" };
+  if (cachedDetail) {
+    await trackRecentCourse(id);
+    return { course: cachedDetail, source: "cache" };
+  }
   try {
     const encodedId = encodeURIComponent(id);
     const [detail, tees] = await Promise.all([
@@ -509,6 +638,7 @@ async function getCourse(id) {
     courseCache.set(id, course.tees.length ? course : null);
     if (!course.tees.length) return null;
     await writeCourseDetail(course);
+    await trackRecentCourse(id);
     return { course, source: "live" };
   } catch {
     return null;
@@ -544,12 +674,16 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/course-index/status" && req.method === "GET") {
     const index = await readCourseIndex();
+    const liveCache = await readLiveSearchCache();
     json(res, 200, {
       available: courseIndexHasData(index),
       fresh: isFreshCourseIndex(index),
       refreshedAt: index?.refreshedAt || null,
       refreshedStates: index?.refreshedStates || 0,
       totalCourses: index?.totalCourses || 0,
+      cachedLiveSearches: Object.keys(liveCache.searches || {}).length,
+      recentCourseIds: (liveCache.recentCourseIds || []).length,
+      detailWarmLimit: DETAIL_WARM_LIMIT,
       openGolfBackoffUntil: openGolfBackoffUntil ? new Date(openGolfBackoffUntil).toISOString() : null
     });
     return;
@@ -605,6 +739,8 @@ const server = http.createServer(async (req, res) => {
 function scheduleCourseIndexRefresh() {
   refreshCourseIndexInBackground();
   setInterval(refreshCourseIndexInBackground, COURSE_INDEX_REFRESH_MS);
+  warmRecentCourseDetailsInBackground();
+  setInterval(warmRecentCourseDetailsInBackground, COURSE_INDEX_REFRESH_MS);
 }
 
 if (process.argv.includes("--refresh-course-index")) {
@@ -614,6 +750,15 @@ if (process.argv.includes("--refresh-course-index")) {
     })
     .catch(error => {
       console.error(`Course index refresh failed: ${error.message}`);
+      process.exitCode = 1;
+    });
+} else if (process.argv.includes("--warm-course-details")) {
+  warmRecentCourseDetails({ force: process.argv.includes("--force") })
+    .then(result => {
+      console.log(`Course details warmed: ${result.warmed || 0}; skipped: ${result.skipped || 0}.`);
+    })
+    .catch(error => {
+      console.error(`Course detail warming failed: ${error.message}`);
       process.exitCode = 1;
     });
 } else {

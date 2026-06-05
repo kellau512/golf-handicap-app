@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "refresh:courses": "node server.js --refresh-course-index"
+    "refresh:courses": "node server.js --refresh-course-index",
+    "warm:details": "node server.js --warm-course-details"
   },
   "engines": {
     "node": ">=18"

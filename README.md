@@ -6,6 +6,7 @@ A local web app for U.S. golfers to calculate a course-specific target score fro
 
 - Manual Handicap Index entry
 - Daily local all-state course index for fast browsing
+- Persistent live-search cache for courses missing from the state index
 - Tee and scorecard detail caching after a course is selected
 - Live course search through OpenGolfAPI when the local index has no match
 - Fallback U.S. sample courses for offline/local testing
@@ -35,6 +36,12 @@ npm run refresh:courses
 ```
 
 Selected course tee and scorecard details are cached separately in `data/course-detail-*.json` after they are loaded. Those detail files are reused for 24 hours.
+
+Courses discovered through live search are stored in `data/live-search-cache.json`, so missing-index courses like Redwood Canyon only need to be discovered once. The server also warms a capped number of recent course-detail files on startup and then once per day. The default cap is 20 courses and can be adjusted with `DETAIL_WARM_LIMIT`.
+
+```bash
+npm run warm:details
+```
 
 ## GHIN Integration Note
 

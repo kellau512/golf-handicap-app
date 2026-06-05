@@ -4,4 +4,5 @@ data/users.json
 data/course-snapshot-*.json
 data/course-index.json
 data/course-detail-*.json
+data/live-search-cache.json
 *.log
