@@ -5,7 +5,10 @@ const state = {
   selectedTee: null,
   courseBrowseMode: false,
   selectedCourseDetailSource: "",
-  courseIndexMeta: null
+  courseIndexMeta: null,
+  liveSearchTimer: null,
+  liveSearchRequestId: 0,
+  lastLiveSearchKey: ""
 };
 
 const RECENT_SETUP_KEY = "golfRecentSetup";
@@ -74,6 +77,8 @@ function matchesCourseQuery(course, query) {
 }
 
 async function loadStateCourses({ applyRecent = false } = {}) {
+  clearTimeout(state.liveSearchTimer);
+  state.lastLiveSearchKey = "";
   els.courseSelect.innerHTML = "<option>Searching...</option>";
   els.courseSelect.disabled = true;
   els.teeSelect.disabled = true;
@@ -100,9 +105,11 @@ async function loadStateCourses({ applyRecent = false } = {}) {
 }
 
 function filterCourses({ applyRecent = false } = {}) {
+  clearTimeout(state.liveSearchTimer);
   state.courses = state.allCourses.filter(course => matchesCourseQuery(course, els.courseSearch.value));
   updateCourseFilterMessage();
   renderCourses({ applyRecent });
+  scheduleLiveSearchFallback();
 }
 
 function updateCourseFilterMessage() {
@@ -114,7 +121,7 @@ function updateCourseFilterMessage() {
   const count = state.courses.length;
   els.courseDataMessage.textContent = count
     ? `Showing ${count} course${count === 1 ? "" : "s"} matching "${query}" from the daily index.`
-    : `No indexed courses match "${query}" in ${els.stateSelect.value}. Press Search to check live course data.`;
+    : `No indexed courses match "${query}" in ${els.stateSelect.value}. Checking live course data...`;
 }
 
 function mergeCourses(courses) {
@@ -128,12 +135,27 @@ function mergeCourses(courses) {
   state.allCourses = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
 
-async function liveSearchCourses() {
+function scheduleLiveSearchFallback() {
   const query = els.courseSearch.value.trim();
+  if (state.courses.length || query.length < 3) return;
+  const searchKey = `${els.stateSelect.value}|${query.toLowerCase()}`;
+  if (searchKey === state.lastLiveSearchKey) return;
+  state.liveSearchTimer = setTimeout(() => {
+    liveSearchCourses({ preserveOnEmpty: true });
+  }, 650);
+}
+
+async function liveSearchCourses({ preserveOnEmpty = false } = {}) {
+  const query = els.courseSearch.value.trim();
+  clearTimeout(state.liveSearchTimer);
   if (!query) {
     filterCourses();
     return;
   }
+  const searchKey = `${els.stateSelect.value}|${query.toLowerCase()}`;
+  state.lastLiveSearchKey = searchKey;
+  const requestId = state.liveSearchRequestId + 1;
+  state.liveSearchRequestId = requestId;
   els.courseSelect.innerHTML = "<option>Searching...</option>";
   els.courseSelect.disabled = true;
   els.teeSelect.disabled = true;
@@ -144,6 +166,7 @@ async function liveSearchCourses() {
       state: els.stateSelect.value
     });
     const payload = await api(`/api/courses?${params.toString()}`);
+    if (requestId !== state.liveSearchRequestId) return;
     const liveCourses = payload.courses || [];
     if (liveCourses.length) {
       mergeCourses(liveCourses);
@@ -153,10 +176,17 @@ async function liveSearchCourses() {
       renderCourses();
       return;
     }
+    if (preserveOnEmpty) {
+      state.courses = state.allCourses.filter(course => matchesCourseQuery(course, els.courseSearch.value));
+      updateCourseFilterMessage();
+      renderCourses();
+      return;
+    }
     state.courses = [];
     els.courseDataMessage.textContent = payload.meta?.message || `No live matches found for "${query}".`;
     renderCourses();
   } catch (error) {
+    if (requestId !== state.liveSearchRequestId) return;
     els.courseDataMessage.textContent = `Live search unavailable: ${error.message}`;
     filterCourses();
   }
