@@ -57,8 +57,10 @@ button:hover {
 }
 
 .top-band {
+  position: relative;
+  overflow: hidden;
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) 230px;
   gap: 24px;
   align-items: end;
   min-height: 220px;
@@ -66,9 +68,38 @@ button:hover {
   border-radius: 8px;
   color: var(--white);
   background:
-    linear-gradient(rgba(8, 43, 69, 0.82), rgba(8, 43, 69, 0.82)),
-    repeating-linear-gradient(90deg, transparent 0 42px, rgba(255, 255, 255, 0.06) 42px 44px),
-    linear-gradient(135deg, var(--navy), var(--blue));
+    radial-gradient(circle at 78% 34%, rgba(199, 244, 100, 0.35), transparent 18%),
+    radial-gradient(ellipse at 84% 105%, #b9f17b 0 18%, #4fc67e 19% 34%, transparent 35%),
+    repeating-linear-gradient(-14deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 34px),
+    linear-gradient(135deg, #082b45 0%, #0d5579 48%, #178f72 100%);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.22), 0 20px 44px rgba(8, 43, 69, 0.16);
+}
+
+.top-band::before {
+  position: absolute;
+  inset: auto 0 0;
+  height: 58px;
+  content: "";
+  background:
+    repeating-radial-gradient(ellipse at 64% 120%, rgba(255, 255, 255, 0.2) 0 2px, transparent 2px 15px),
+    linear-gradient(180deg, transparent, rgba(4, 66, 50, 0.34));
+}
+
+.top-band::after {
+  position: absolute;
+  right: 28px;
+  bottom: 20px;
+  width: 260px;
+  height: 72px;
+  border-radius: 50%;
+  content: "";
+  background: radial-gradient(ellipse, rgba(5, 36, 45, 0.28), transparent 68%);
+  transform: rotate(-3deg);
+}
+
+.title-copy {
+  position: relative;
+  z-index: 1;
 }
 
 .eyebrow {
@@ -85,6 +116,52 @@ h1 {
   font-size: clamp(2.2rem, 7vw, 5rem);
   line-height: 0.95;
   letter-spacing: 0;
+}
+
+.pin-scene {
+  position: relative;
+  z-index: 1;
+  justify-self: end;
+  width: 190px;
+  height: 168px;
+}
+
+.pin-pole {
+  position: absolute;
+  right: 78px;
+  bottom: 22px;
+  width: 5px;
+  height: 138px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff, #d9edf0);
+  box-shadow: 8px 12px 20px rgba(8, 43, 69, 0.24);
+}
+
+.pin-flag {
+  position: absolute;
+  right: 82px;
+  top: 14px;
+  width: 96px;
+  height: 56px;
+  border-radius: 8px 8px 8px 0;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.22), transparent 45%),
+    linear-gradient(135deg, #c7f464, #22a86b);
+  clip-path: polygon(0 0, 100% 0, 78% 50%, 100% 100%, 0 100%);
+  box-shadow: 0 16px 28px rgba(8, 43, 69, 0.24);
+}
+
+.pin-cup {
+  position: absolute;
+  right: 46px;
+  bottom: 8px;
+  width: 76px;
+  height: 28px;
+  border: 5px solid rgba(255, 255, 255, 0.72);
+  border-top-color: rgba(8, 43, 69, 0.42);
+  border-radius: 50%;
+  background: rgba(8, 43, 69, 0.24);
+  transform: rotate(-3deg);
 }
 
 .hidden {
@@ -436,7 +513,34 @@ select {
 
   .top-band {
     align-items: start;
+    grid-template-columns: 1fr 120px;
     min-height: 0;
+    padding: 22px;
+  }
+
+  .pin-scene {
+    width: 112px;
+    height: 118px;
+  }
+
+  .pin-pole {
+    right: 42px;
+    bottom: 18px;
+    height: 94px;
+  }
+
+  .pin-flag {
+    right: 46px;
+    top: 10px;
+    width: 62px;
+    height: 38px;
+  }
+
+  .pin-cup {
+    right: 20px;
+    bottom: 8px;
+    width: 54px;
+    height: 22px;
   }
 
   .app-shell {
