@@ -60,7 +60,7 @@ button:hover {
   position: relative;
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 230px;
+  grid-template-columns: minmax(0, 1fr) 260px;
   gap: 24px;
   align-items: end;
   min-height: 220px;
@@ -122,45 +122,45 @@ h1 {
   position: relative;
   z-index: 1;
   justify-self: end;
-  width: 190px;
-  height: 168px;
+  width: 250px;
+  height: 176px;
+  overflow: hidden;
 }
 
-.pin-pole {
+.pin-image {
   position: absolute;
-  right: 78px;
-  bottom: 22px;
-  width: 5px;
-  height: 138px;
+  right: 0;
+  top: 8px;
+  width: 232px;
+  height: 148px;
+  object-fit: cover;
+  object-position: 50% 0%;
+  filter: drop-shadow(14px 16px 18px rgba(8, 43, 69, 0.3));
+}
+
+.pin-scene::before {
+  position: absolute;
+  right: 102px;
+  top: 68px;
+  bottom: 30px;
+  width: 4px;
   border-radius: 999px;
+  content: "";
   background: linear-gradient(180deg, #ffffff, #d9edf0);
-  box-shadow: 8px 12px 20px rgba(8, 43, 69, 0.24);
+  box-shadow: 8px 12px 18px rgba(8, 43, 69, 0.22);
 }
 
-.pin-flag {
+.pin-scene::after {
   position: absolute;
-  right: 82px;
-  top: 14px;
-  width: 96px;
-  height: 56px;
-  border-radius: 8px 8px 8px 0;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.22), transparent 45%),
-    linear-gradient(135deg, #c7f464, #22a86b);
-  clip-path: polygon(0 0, 100% 0, 78% 50%, 100% 100%, 0 100%);
-  box-shadow: 0 16px 28px rgba(8, 43, 69, 0.24);
-}
-
-.pin-cup {
-  position: absolute;
-  right: 46px;
-  bottom: 8px;
-  width: 76px;
-  height: 28px;
-  border: 5px solid rgba(255, 255, 255, 0.72);
+  right: 74px;
+  bottom: 12px;
+  width: 58px;
+  height: 20px;
+  border: 4px solid rgba(255, 255, 255, 0.72);
   border-top-color: rgba(8, 43, 69, 0.42);
   border-radius: 50%;
-  background: rgba(8, 43, 69, 0.24);
+  content: "";
+  background: rgba(8, 43, 69, 0.22);
   transform: rotate(-3deg);
 }
 
@@ -519,28 +519,29 @@ select {
   }
 
   .pin-scene {
-    width: 112px;
+    width: 128px;
     height: 118px;
   }
 
-  .pin-pole {
-    right: 42px;
-    bottom: 18px;
-    height: 94px;
+  .pin-image {
+    right: -24px;
+    top: 8px;
+    width: 142px;
+    height: 92px;
   }
 
-  .pin-flag {
-    right: 46px;
-    top: 10px;
-    width: 62px;
-    height: 38px;
+  .pin-scene::before {
+    right: 58px;
+    top: 50px;
+    bottom: 24px;
+    width: 3px;
   }
 
-  .pin-cup {
-    right: 20px;
+  .pin-scene::after {
+    right: 32px;
     bottom: 8px;
-    width: 54px;
-    height: 22px;
+    width: 42px;
+    height: 16px;
   }
 
   .app-shell {
