@@ -114,7 +114,52 @@ function updateCourseFilterMessage() {
   const count = state.courses.length;
   els.courseDataMessage.textContent = count
     ? `Showing ${count} course${count === 1 ? "" : "s"} matching "${query}" from the daily index.`
-    : `No indexed courses match "${query}" in ${els.stateSelect.value}.`;
+    : `No indexed courses match "${query}" in ${els.stateSelect.value}. Press Search to check live course data.`;
+}
+
+function mergeCourses(courses) {
+  const byId = new Map(state.allCourses.map(course => [course.id, course]));
+  for (const course of courses) {
+    byId.set(course.id, {
+      ...byId.get(course.id),
+      ...course
+    });
+  }
+  state.allCourses = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+async function liveSearchCourses() {
+  const query = els.courseSearch.value.trim();
+  if (!query) {
+    filterCourses();
+    return;
+  }
+  els.courseSelect.innerHTML = "<option>Searching...</option>";
+  els.courseSelect.disabled = true;
+  els.teeSelect.disabled = true;
+  els.courseDataMessage.textContent = `Checking live course data for "${query}"...`;
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      state: els.stateSelect.value
+    });
+    const payload = await api(`/api/courses?${params.toString()}`);
+    const liveCourses = payload.courses || [];
+    if (liveCourses.length) {
+      mergeCourses(liveCourses);
+      state.courses = liveCourses;
+      state.courseBrowseMode = payload.meta?.source === "browse";
+      els.courseDataMessage.textContent = payload.meta?.message || `Showing ${liveCourses.length} live result${liveCourses.length === 1 ? "" : "s"}.`;
+      renderCourses();
+      return;
+    }
+    state.courses = [];
+    els.courseDataMessage.textContent = payload.meta?.message || `No live matches found for "${query}".`;
+    renderCourses();
+  } catch (error) {
+    els.courseDataMessage.textContent = `Live search unavailable: ${error.message}`;
+    filterCourses();
+  }
 }
 
 function renderCourses({ applyRecent = false } = {}) {
@@ -478,7 +523,7 @@ async function loadCourseIndexStatus() {
   }
 }
 
-els.searchBtn.addEventListener("click", () => filterCourses());
+els.searchBtn.addEventListener("click", liveSearchCourses);
 els.stateSelect.addEventListener("change", () => loadStateCourses());
 els.courseSelect.addEventListener("change", selectCourse);
 els.teeSelect.addEventListener("change", selectTee);
@@ -494,7 +539,7 @@ els.teeComparison.addEventListener("click", event => {
   selectTee();
 });
 els.courseSearch.addEventListener("keydown", event => {
-  if (event.key === "Enter") filterCourses();
+  if (event.key === "Enter") liveSearchCourses();
 });
 els.courseSearch.addEventListener("input", () => filterCourses());
 

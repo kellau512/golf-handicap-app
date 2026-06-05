@@ -11,6 +11,7 @@ const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = path.join(ROOT, "data");
 const OPEN_GOLF_BASE_URL = "https://api.opengolfapi.org/v1";
 const OPEN_GOLF_SEARCH_LIMIT = 10;
+const OPEN_GOLF_STATE_INDEX_LIMIT = 500;
 const DEFAULT_BROWSE_STATE = "CA";
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -296,7 +297,7 @@ async function refreshCourseIndex({ force = false } = {}) {
 
     for (const state of STATE_CODES) {
       try {
-        const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(state)}`);
+        const data = await fetchOpenGolf(`/courses/state/${encodeURIComponent(state)}?limit=${OPEN_GOLF_STATE_INDEX_LIMIT}`);
         const list = Array.isArray(data) ? data : data.courses || data.results || [];
         const courses = sortCoursesByName(list.map(normalizeCourseSummary));
         states[state] = {
