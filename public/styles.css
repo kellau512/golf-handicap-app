@@ -148,6 +148,14 @@ select {
   line-height: 1.35;
 }
 
+.index-status {
+  margin: -14px 0 0;
+  color: var(--blue);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .course-details {
   display: grid;
   gap: 8px;

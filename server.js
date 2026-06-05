@@ -494,10 +494,10 @@ async function searchCourses(query, stateFilter = "") {
 
 async function getCourse(id) {
   const sample = sampleCourses.find(course => course.id === id);
-  if (sample) return sample;
-  if (courseCache.has(id)) return courseCache.get(id);
+  if (sample) return { course: sample, source: "sample" };
+  if (courseCache.has(id)) return { course: courseCache.get(id), source: "memory" };
   const cachedDetail = await readCourseDetail(id);
-  if (cachedDetail) return cachedDetail;
+  if (cachedDetail) return { course: cachedDetail, source: "cache" };
   try {
     const encodedId = encodeURIComponent(id);
     const [detail, tees] = await Promise.all([
@@ -508,7 +508,7 @@ async function getCourse(id) {
     courseCache.set(id, course.tees.length ? course : null);
     if (!course.tees.length) return null;
     await writeCourseDetail(course);
-    return course;
+    return { course, source: "live" };
   } catch {
     return null;
   }
@@ -524,12 +524,12 @@ async function handleApi(req, res, url) {
 
   if (url.pathname.startsWith("/api/courses/") && req.method === "GET") {
     const id = decodeURIComponent(url.pathname.replace("/api/courses/", ""));
-    const course = await getCourse(id);
-    if (!course) {
+    const result = await getCourse(id);
+    if (!result?.course) {
       json(res, 404, { error: "Tee ratings and scorecard data are not available for this course yet." });
       return;
     }
-    json(res, 200, { course });
+    json(res, 200, { course: result.course, meta: { source: result.source } });
     return;
   }
 

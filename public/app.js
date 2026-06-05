@@ -1,9 +1,14 @@
 const state = {
+  allCourses: [],
   courses: [],
   selectedCourse: null,
   selectedTee: null,
-  courseBrowseMode: false
+  courseBrowseMode: false,
+  selectedCourseDetailSource: "",
+  courseIndexMeta: null
 };
+
+const RECENT_SETUP_KEY = "golfRecentSetup";
 
 const els = {
   handicapInput: document.querySelector("#handicapInput"),
@@ -12,6 +17,7 @@ const els = {
   searchBtn: document.querySelector("#searchBtn"),
   courseSelect: document.querySelector("#courseSelect"),
   courseDataMessage: document.querySelector("#courseDataMessage"),
+  courseIndexStatus: document.querySelector("#courseIndexStatus"),
   teeSelect: document.querySelector("#teeSelect"),
   courseDetails: document.querySelector("#courseDetails"),
   ghinStatus: document.querySelector("#ghinStatus"),
@@ -39,30 +45,79 @@ async function api(path, options = {}) {
   return payload;
 }
 
-async function searchCourses() {
+function getRecentSetup() {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_SETUP_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveRecentSetup() {
+  if (!state.selectedCourse || !state.selectedTee) return;
+  try {
+    localStorage.setItem(RECENT_SETUP_KEY, JSON.stringify({
+      state: els.stateSelect.value,
+      courseId: state.selectedCourse.id,
+      teeId: state.selectedTee.id,
+      handicapIndex: els.handicapInput.value
+    }));
+  } catch {
+    // Local storage is a convenience only; the calculator should still work without it.
+  }
+}
+
+function matchesCourseQuery(course, query) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  return [course.name, course.city, course.state].some(value => String(value || "").toLowerCase().includes(normalized));
+}
+
+async function loadStateCourses({ applyRecent = false } = {}) {
   els.courseSelect.innerHTML = "<option>Searching...</option>";
   els.courseSelect.disabled = true;
   els.teeSelect.disabled = true;
   els.courseDataMessage.textContent = "Searching available U.S. course data...";
   try {
     const params = new URLSearchParams({
-      q: els.courseSearch.value.trim(),
+      q: "",
       state: els.stateSelect.value
     });
     const payload = await api(`/api/courses?${params.toString()}`);
-    state.courses = payload.courses || [];
+    state.allCourses = payload.courses || [];
     state.courseBrowseMode = payload.meta?.source === "browse";
+    state.courseIndexMeta = payload.meta || null;
     els.courseDataMessage.textContent = payload.meta?.message || "";
-    renderCourses();
+    filterCourses({ applyRecent });
   } catch (error) {
+    state.allCourses = [];
     state.courses = [];
     state.courseBrowseMode = false;
+    state.courseIndexMeta = null;
     els.courseDataMessage.textContent = error.message;
     renderCourses();
   }
 }
 
-function renderCourses() {
+function filterCourses({ applyRecent = false } = {}) {
+  state.courses = state.allCourses.filter(course => matchesCourseQuery(course, els.courseSearch.value));
+  updateCourseFilterMessage();
+  renderCourses({ applyRecent });
+}
+
+function updateCourseFilterMessage() {
+  const query = els.courseSearch.value.trim();
+  if (!query) {
+    els.courseDataMessage.textContent = state.courseIndexMeta?.message || "";
+    return;
+  }
+  const count = state.courses.length;
+  els.courseDataMessage.textContent = count
+    ? `Showing ${count} course${count === 1 ? "" : "s"} matching "${query}" from the daily index.`
+    : `No indexed courses match "${query}" in ${els.stateSelect.value}.`;
+}
+
+function renderCourses({ applyRecent = false } = {}) {
   els.courseSelect.innerHTML = "";
   els.courseSelect.disabled = state.courses.length === 0;
   els.teeSelect.disabled = state.courses.length === 0;
@@ -73,31 +128,46 @@ function renderCourses() {
     clearScorecard();
     return;
   }
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select a course";
+  els.courseSelect.append(placeholder);
   for (const course of state.courses) {
     const option = document.createElement("option");
     option.value = course.id;
     option.textContent = [course.name, course.city, course.state].filter(Boolean).join(" • ");
     els.courseSelect.append(option);
   }
-  if (state.courseBrowseMode) {
-    els.courseSelect.selectedIndex = -1;
-    state.selectedCourse = null;
+  const recent = getRecentSetup();
+  if (applyRecent && recent.state === els.stateSelect.value && state.courses.some(course => course.id === recent.courseId)) {
+    if (recent.handicapIndex !== undefined) els.handicapInput.value = recent.handicapIndex;
+    els.courseSelect.value = recent.courseId;
+    selectCourse({ preferredTeeId: recent.teeId });
+    return;
+  }
+  els.courseSelect.value = "";
+  state.selectedCourse = null;
+  state.selectedCourseDetailSource = "";
+  clearPlayableDataOnly();
+}
+
+async function selectCourse({ preferredTeeId = "" } = {}) {
+  state.selectedCourse = state.courses.find(course => course.id === els.courseSelect.value) || null;
+  state.selectedCourseDetailSource = "";
+  if (!state.selectedCourse) {
     clearPlayableDataOnly();
     return;
   }
-  selectCourse();
-}
-
-async function selectCourse() {
-  state.selectedCourse = state.courses.find(course => course.id === els.courseSelect.value) || state.courses[0] || null;
   if (state.selectedCourse && !state.selectedCourse.tees.length) {
     els.teeSelect.innerHTML = "<option>Loading tees...</option>";
     els.teeSelect.disabled = true;
-    clearPlayableDataOnly();
+    renderTeeLoading();
     try {
       const payload = await api(`/api/courses/${encodeURIComponent(state.selectedCourse.id)}`);
       const hydratedCourse = payload.course;
+      state.selectedCourseDetailSource = payload.meta?.source || "";
       state.courses = state.courses.map(course => course.id === hydratedCourse.id ? hydratedCourse : course);
+      state.allCourses = state.allCourses.map(course => course.id === hydratedCourse.id ? hydratedCourse : course);
       state.selectedCourse = hydratedCourse;
       els.teeSelect.disabled = false;
     } catch (error) {
@@ -105,11 +175,11 @@ async function selectCourse() {
       return;
     }
   }
-  renderTees();
+  renderTees(preferredTeeId);
   renderCourseDetails();
 }
 
-function renderTees() {
+function renderTees(preferredTeeId = "") {
   els.teeSelect.innerHTML = "";
   if (!state.selectedCourse || !state.selectedCourse.tees.length) {
     clearScorecard();
@@ -121,6 +191,9 @@ function renderTees() {
     const yardage = tee.yardage ? ` • ${tee.yardage} yds` : "";
     option.textContent = `${tee.name} ${tee.gender ? `(${tee.gender})` : ""} • ${tee.rating}/${tee.slope}${yardage}`;
     els.teeSelect.append(option);
+  }
+  if (preferredTeeId && state.selectedCourse.tees.some(tee => tee.id === preferredTeeId)) {
+    els.teeSelect.value = preferredTeeId;
   }
   selectTee();
   renderTeeComparison();
@@ -136,6 +209,7 @@ function renderCourseDetails() {
     [course.courseType, "Type"],
     [course.address, "Address"],
     [course.holesCount ? `${course.holesCount} holes` : "", "Holes"],
+    [formatDetailSource(state.selectedCourseDetailSource), "Tee Data"],
     [course.availabilityMessage, "Availability"]
   ].filter(([value]) => value);
 
@@ -174,11 +248,38 @@ function renderCourseUnavailable(message) {
   `;
 }
 
+function formatDetailSource(source) {
+  if (source === "cache") return "Loaded from local cache";
+  if (source === "memory") return "Loaded from this session";
+  if (source === "live") return "Loaded live and cached";
+  if (source === "sample") return "Sample course data";
+  return "";
+}
+
+function renderTeeLoading() {
+  state.selectedTee = null;
+  els.courseHandicap.textContent = "--";
+  els.targetScore.textContent = "--";
+  els.ratingSlope.textContent = "--";
+  els.totalPar.textContent = "--";
+  els.courseFormula.textContent = "--";
+  els.targetFormula.textContent = "--";
+  els.strokeSummary.textContent = "--";
+  els.teeComparison.innerHTML = "";
+  renderCourseDetails();
+  els.scorecardBody.innerHTML = `
+    <tr>
+      <td colspan="5">Loading tee ratings and scorecard data for this course...</td>
+    </tr>
+  `;
+}
+
 function selectTee() {
   if (!state.selectedCourse) return;
   state.selectedTee = state.selectedCourse.tees.find(tee => tee.id === els.teeSelect.value) || state.selectedCourse.tees[0] || null;
   calculate();
   renderTeeComparison();
+  saveRecentSetup();
 }
 
 function strokesForHole(courseHandicap, allocation) {
@@ -352,13 +453,39 @@ async function loadGhinStatus() {
   els.ghinStatus.textContent = payload.message;
 }
 
-els.searchBtn.addEventListener("click", searchCourses);
-els.stateSelect.addEventListener("change", searchCourses);
+function formatDateTime(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+async function loadCourseIndexStatus() {
+  if (!els.courseIndexStatus) return;
+  try {
+    const payload = await api("/api/course-index/status");
+    if (payload.available) {
+      const freshness = payload.fresh ? "fresh" : "stale";
+      els.courseIndexStatus.textContent = `Daily index ${freshness} • ${payload.totalCourses} courses • refreshed ${formatDateTime(payload.refreshedAt)}`;
+    } else {
+      els.courseIndexStatus.textContent = "Daily course index is not available yet.";
+    }
+  } catch (error) {
+    els.courseIndexStatus.textContent = `Daily course index status unavailable: ${error.message}`;
+  }
+}
+
+els.searchBtn.addEventListener("click", () => filterCourses());
+els.stateSelect.addEventListener("change", () => loadStateCourses());
 els.courseSelect.addEventListener("change", selectCourse);
 els.teeSelect.addEventListener("change", selectTee);
 els.handicapInput.addEventListener("input", () => {
   calculate();
   renderTeeComparison();
+  saveRecentSetup();
 });
 els.teeComparison.addEventListener("click", event => {
   const card = event.target.closest(".tee-card");
@@ -367,7 +494,8 @@ els.teeComparison.addEventListener("click", event => {
   selectTee();
 });
 els.courseSearch.addEventListener("keydown", event => {
-  if (event.key === "Enter") searchCourses();
+  if (event.key === "Enter") filterCourses();
 });
+els.courseSearch.addEventListener("input", () => filterCourses());
 
-Promise.all([loadGhinStatus(), searchCourses()]);
+Promise.all([loadGhinStatus(), loadCourseIndexStatus(), loadStateCourses({ applyRecent: true })]);
