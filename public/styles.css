@@ -134,16 +134,6 @@ select {
   font-weight: 700;
 }
 
-select.course-browser {
-  min-height: 242px;
-  padding: 8px;
-  overflow-y: auto;
-}
-
-select.course-browser option {
-  padding: 8px 6px;
-}
-
 .search-row {
   display: grid;
   grid-template-columns: 1fr auto;

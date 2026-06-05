@@ -66,12 +66,6 @@ function renderCourses() {
   els.courseSelect.innerHTML = "";
   els.courseSelect.disabled = state.courses.length === 0;
   els.teeSelect.disabled = state.courses.length === 0;
-  els.courseSelect.classList.toggle("course-browser", state.courseBrowseMode && state.courses.length > 1);
-  if (state.courseBrowseMode && state.courses.length > 1) {
-    els.courseSelect.size = Math.min(8, state.courses.length);
-  } else {
-    els.courseSelect.removeAttribute("size");
-  }
   if (!state.courses.length) {
     const option = document.createElement("option");
     option.textContent = "No courses found";
@@ -326,8 +320,6 @@ function clearScorecard() {
   state.selectedCourse = null;
   state.selectedTee = null;
   state.courseBrowseMode = false;
-  els.courseSelect.removeAttribute("size");
-  els.courseSelect.classList.remove("course-browser");
   clearPlayableDataOnly();
   els.scorecardBody.innerHTML = `
     <tr>
