@@ -129,30 +129,32 @@ h1 {
 
 .pin-image {
   position: absolute;
-  right: 0;
+  left: 28px;
   top: 8px;
   width: 232px;
   height: 148px;
   object-fit: cover;
   object-position: 50% 0%;
+  z-index: 2;
   filter: drop-shadow(14px 16px 18px rgba(8, 43, 69, 0.3));
 }
 
 .pin-scene::before {
   position: absolute;
-  right: 102px;
+  left: 58px;
   top: 68px;
   bottom: 30px;
   width: 4px;
   border-radius: 999px;
   content: "";
+  z-index: 3;
   background: linear-gradient(180deg, #ffffff, #d9edf0);
   box-shadow: 8px 12px 18px rgba(8, 43, 69, 0.22);
 }
 
 .pin-scene::after {
   position: absolute;
-  right: 74px;
+  left: 30px;
   bottom: 12px;
   width: 58px;
   height: 20px;
@@ -160,6 +162,7 @@ h1 {
   border-top-color: rgba(8, 43, 69, 0.42);
   border-radius: 50%;
   content: "";
+  z-index: 1;
   background: rgba(8, 43, 69, 0.22);
   transform: rotate(-3deg);
 }
@@ -524,21 +527,21 @@ select {
   }
 
   .pin-image {
-    right: -24px;
+    left: 8px;
     top: 8px;
     width: 142px;
     height: 92px;
   }
 
   .pin-scene::before {
-    right: 58px;
+    left: 27px;
     top: 50px;
     bottom: 24px;
     width: 3px;
   }
 
   .pin-scene::after {
-    right: 32px;
+    left: 10px;
     bottom: 8px;
     width: 42px;
     height: 16px;
