@@ -303,7 +303,40 @@ select {
 }
 
 .formula-help {
+  position: relative;
   cursor: help;
+}
+
+.formula-help:focus {
+  outline: 2px solid rgba(34, 168, 107, 0.45);
+  outline-offset: -2px;
+}
+
+.formula-tooltip {
+  position: absolute;
+  z-index: 3;
+  left: 14px;
+  bottom: calc(100% - 4px);
+  width: min(320px, calc(100vw - 64px));
+  padding: 10px 12px;
+  border: 1px solid #b9d4ce;
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--white);
+  box-shadow: 0 12px 28px rgba(8, 43, 69, 0.16);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.formula-help:hover .formula-tooltip,
+.formula-help:focus .formula-tooltip {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .scorecard-wrap {
